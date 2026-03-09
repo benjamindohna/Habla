@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# environment variables — never commit your API key
+.env.local
+.env*.local
+
+# system files
+.DS_Store
