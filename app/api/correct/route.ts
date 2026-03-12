@@ -51,22 +51,9 @@ Your goals are:
    - second: the corresponding learner segment
 19. If something was already exactly correct and truly aligned, it may appear as a neutral matched pair.
 20. If something is missing in the learner version, use an empty learner segment.
-21. If the learner said something extra that does not belong in the local version, attach it to the most relevant pair and explain it in a note.
+21. If the learner said something extra that does not belong in the local version, attach it to the most relevant pair.
 22. Prefer pedagogical usefulness over mechanical diffing.
 23. The purpose is to help the learner clearly see:
-   - what they tried to say,
-   - how a local Spaniard would say it,
-   - which parts were already correct,
-   - which parts were wrong, unnatural, misplaced, or mixed-language.
-24. Output all segment pairs in the order of the LOCAL SPANISH sentence, not in the learner's original order.
-25. In each pair, always put:
-   - first: the local Spanish segment
-   - second: the corresponding learner segment
-26. If something was already exactly correct, it may appear as a neutral matched pair.
-27. If something is missing in the learner version, use an empty learner segment.
-28. If the learner said something extra that does not belong in the local version, attach it to the most relevant pair and explain it in a note.
-29. Prefer pedagogical usefulness over mechanical diffing.
-30. The purpose is to help the learner clearly see:
    - what they tried to say,
    - how a local Spaniard would say it,
    - which parts were already correct,
@@ -76,7 +63,7 @@ Important interpretation rules:
 - First infer the most likely intended meaning of the learner transcript.
 - Do not stay too close to the learner wording when writing the local version.
 - The local version must sound like natural everyday Spanish from an average local Spaniard, not textbook Spanish, not overly formal Spanish, and not a minimal correction.
-- If the learner's meaning is somewhat uncertain, choose the most likely interpretation and note the uncertainty briefly.
+- If the learner's meaning is somewhat uncertain, choose the most likely interpretation.
 - When comparing the learner transcript to the local version, exact matches mean exact lexical matches in the same order that also correspond to the same meaning and same local sentence function.
 - A repeated function word such as "en", "de", "y", or "a" must NOT be matched automatically just because it appears somewhere in both sentences.
 - Only mark a word or short stretch as a match if it belongs to the same semantic slot or local sentence region in both versions.
@@ -88,13 +75,6 @@ Important interpretation rules:
 - If a local segment corresponds to multiple separated learner segments, you may combine them logically in the user_segment field if that is the clearest pedagogical representation.
 - The learner segmentation must be driven by meaningful learner units and true semantic alignment, not by arbitrary token overlap.
 - The final displayed order must always follow the local Spanish sentence.
-
-Additional teaching rule:
-- If the local version uses wording that is substantially different from the learner transcript, do not assume the learner already knows it.
-- In such cases, the corresponding comment_native must explicitly explain the new wording in learner-friendly ${nativeLanguage}.
-- If a local segment contains a word, phrase, or construction that could feel unexpected or unfamiliar, explain what it means and why a local speaker would naturally choose it here.
-- Never leave a strongly reformulated segment with only a minimal comment like "this sounds more natural".
-- The more surprising or different the local wording is, the more explanatory detail the comment_native should contain.
 
 Additional matching rule:
 - Preserve learner success visibly and precisely.
@@ -128,8 +108,7 @@ Return ONLY valid JSON with exactly this structure:
     {
       "local_segment": "string",
       "user_segment": "string",
-      "is_match": true,
-      "comment_native": "string"
+      "is_match": true
     }
   ]
 }
@@ -147,7 +126,7 @@ Detailed requirements for the JSON fields:
 - notes_native: A short note in the learner's native language if interpretation uncertainty exists; otherwise a short summary in the learner's native language of the overall situation.
 
 - pairs: An ordered list of segment pairs. The order must follow the local_version_es from left to right.
-  Each pair must contain: local_segment, user_segment, is_match, comment_native.
+  Each pair must contain: local_segment, user_segment, is_match.
 
 Rules for is_match:
 - is_match must be true only if the learner segment and the local segment are exactly the same in wording for the purposes of display.
@@ -156,20 +135,6 @@ Rules for is_match:
 - Prefer marking independently correct words or short stretches as is_match true whenever possible.
 - However, do not mark a tiny subpart as is_match true if doing so would break apart a clearly unified phrase or learning unit.
 - Use exact matching less conservatively than before, but only when the match is semantically aligned, locally grounded, and not structurally misleading.
-
-Rules for comments:
-- comment_native must be useful, clear, and written in the learner's native language.
-- If is_match is true, comment_native should be brief and simply indicate that this part is already correct and natural.
-- If is_match is false, comment_native must explain:
-  - what the learner said,
-  - what a local Spaniard would say instead,
-  - why the learner version does not match the natural local phrasing,
-  - and why the local segment is the better choice here.
-- If the local segment contains Spanish words or expressions that may be new to the learner, briefly explain their meaning and use in the learner's native language.
-- If a local segment introduces a word or phrase the learner may not know yet, explain what it means in this context, where it comes from if relevant, and when native speakers typically use it.
-- If the local segment is substantially different from the learner segment, explain the difference clearly enough that the learner can understand the new wording.
-- Prefer short but rich explanations over extremely short comments.
-- Aim for about 2–4 sentences when needed, especially if the local segment contains new vocabulary or a less transparent reformulation.
 
 Very important:
 - Always write numbers as words, never as digits — in all fields including local_version_es, local_segment, user_segment, and intended_meaning_native.
@@ -198,7 +163,7 @@ export async function POST(req: NextRequest) {
     }
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: buildSystemPrompt(nativeLanguage) },

@@ -145,7 +145,7 @@ export default function Page() {
             </div>
 
             {/* Corrected Spanish block */}
-            <CorrectionBlock result={status.result} />
+            <CorrectionBlock result={status.result} nativeLanguage={nativeLanguage} />
 
             <div className="flex justify-center">
               <button
