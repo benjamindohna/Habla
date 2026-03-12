@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import AudioRecorder from "@/components/AudioRecorder";
 import CorrectionBlock from "@/components/CorrectionBlock";
 import type { CorrectionResult } from "@/types/correction";
@@ -41,8 +42,14 @@ async function correctTranscript(transcript: string, nativeLanguage: NativeLangu
 }
 
 export default function Page() {
+  const router = useRouter();
   const [status, setStatus] = useState<AppStatus>({ stage: "idle" });
   const [nativeLanguage, setNativeLanguage] = useState<NativeLanguage>("German");
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  }
 
   async function handleRecordingComplete(blob: Blob) {
     try {
@@ -65,7 +72,7 @@ export default function Page() {
     <main className="flex min-h-screen flex-col items-center px-4 py-8">
 
       {/* Selectors — top center, minimal */}
-      <div className="flex items-center gap-4 mb-12">
+      <div className="w-full max-w-xl flex items-center justify-between mb-12">
         <div className="flex items-center gap-2">
           <label htmlFor="lang-select" className="text-xs text-neutral-400">
             Native language
@@ -82,6 +89,12 @@ export default function Page() {
           </select>
         </div>
 
+        <button
+          onClick={handleLogout}
+          className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
+        >
+          Sign out
+        </button>
       </div>
 
       {/* Main content — vertically centered */}
