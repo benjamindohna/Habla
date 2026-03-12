@@ -19,27 +19,22 @@ export interface User {
 export const USERS: User[] = [
   {
     email: "admin@habla.app",
-    passwordHash: "$2b$10$fIQ0W./whHAt.JnSKLidlOHzNC9Nkv2zdJ9azO3IE3/BJkdH4qYPO",
-    // password: HablaAdmin1!
+    passwordHash: "$2b$10$EDLzkiN4S7iVvLoTIV1FdeuU9feJ1N2G52XBytT6YIDHTuoUUunLm",
   },
   {
     email: "alice@habla.app",
-    passwordHash: "$2b$10$5Sv4/xhfSqDax0O7cKbjVuMHbsH52kHqYhpERfBupBc/eO/DkaoJu",
-    // password: AliceSpanish2!
+    passwordHash: "$2b$10$n3itOSNUW9ueVQt0XJwniOjAQevLMhFE1nFa3PMpM4wZJk7IG6lAa",
   },
   {
     email: "bob@habla.app",
-    passwordHash: "$2b$10$ANV3ACyXKMuqrl.ZjlDMROrLn/9Ib5tIcPX5duIroi9s2UPRagKCG",
-    // password: BobHabla3!
+    passwordHash: "$2b$10$cqDABLIxK9BztntcmIOCnu6e7mCjhxETrfRxbwwa58aljXOeQGkha",
   },
   {
     email: "carlos@habla.app",
-    passwordHash: "$2b$10$f4/MXpcX3.vRLS4hq8d/LOGfapClKwohI7FKbmN9DUf98M.eKeUdS",
-    // password: CarlosLingua4!
+    passwordHash: "$2b$10$6al5VDFMH/pxPaHIPh4aV.TvZF6/k9pLCAJUdaISAJ9U1bQGZMBpS",
   },
   {
     email: "diana@habla.app",
-    passwordHash: "$2b$10$x2AFHdf7DmkIbJPv3BqVZuO0ZeaE1VJyF7b2/n0BX.pmXEcq.a4d6",
-    // password: DianaLearn5!
+    passwordHash: "$2b$10$3n9fNEXcnwm071PDUz07RuoJE0IzFo1CiZEdjQVz17thc39o/DfYu",
   },
 ];
