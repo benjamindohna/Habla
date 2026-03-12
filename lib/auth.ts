@@ -20,7 +20,7 @@ export async function createSession(email: string) {
   const cookieStore = await cookies();
   cookieStore.set(COOKIE_NAME, token, {
     httpOnly: true,   // not accessible from JS — prevents XSS theft
-    secure: true,     // HTTPS only
+    secure: process.env.NODE_ENV === "production", // HTTPS only in prod; allows localhost
     sameSite: "lax",  // CSRF protection
     maxAge: 60 * 60 * 24 * 7, // 7 days in seconds
     path: "/",
