@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import type { CorrectionResult, Pair } from "@/types/correction";
 
 interface CorrectionBlockProps {
@@ -55,12 +55,14 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
           aria-label="Corrected sentence"
         >
           {result.pairs.map((pair, i) => (
-            <PairChip
-              key={i}
-              pair={pair}
-              isSelected={selectedIndex === i}
-              onClick={() => handlePairClick(pair, i)}
-            />
+            <Fragment key={i}>
+              <PairChip
+                pair={pair}
+                isSelected={selectedIndex === i}
+                onClick={() => handlePairClick(pair, i)}
+              />
+              {" "}
+            </Fragment>
           ))}
         </div>
       </div>
@@ -89,8 +91,11 @@ interface PairChipProps {
 }
 
 function PairChip({ pair, isSelected, onClick }: PairChipProps) {
+  const local = pair.local_segment.trim();
+  const user = pair.user_segment.trim();
+
   if (pair.is_match) {
-    return <span>{pair.local_segment}</span>;
+    return <span>{local}</span>;
   }
 
   return (
@@ -106,9 +111,9 @@ function PairChip({ pair, isSelected, onClick }: PairChipProps) {
       <span
         className="absolute left-0 w-full text-center text-[0.65rem] leading-none text-rose-400 whitespace-nowrap"
         style={{ bottom: "calc(100% + 4px)" }}
-        aria-label={`learner said: ${pair.user_segment}`}
+        aria-label={`learner said: ${user}`}
       >
-        {pair.user_segment}
+        {user}
       </span>
       {/* Local Spanish — primary text with green highlight */}
       <span
@@ -118,7 +123,7 @@ function PairChip({ pair, isSelected, onClick }: PairChipProps) {
             : "bg-green-100 text-green-800 hover:bg-green-200"
         }`}
       >
-        {pair.local_segment}
+        {local}
       </span>
     </span>
   );

@@ -17,9 +17,9 @@ What the learner said: "${userSegment || "(nothing — left this out)"}"
 
 Determine which case applies and respond accordingly in ${nativeLanguage}:
 
-CASE A — The learner used a ${nativeLanguage} word (or a non-Spanish word) instead of the Spanish one:
-Do NOT frame this as a mistake. It is completely normal not to know every word yet. Simply present the Spanish word in a neutral, informative way: give the infinitive (for verbs) or base form (for nouns/adjectives), its basic translation(s), and briefly note the specific form used in this sentence (e.g. conjugation, gender, plural). Keep it to 1–2 sentences.
-Example tone: "Jugar — to play. Here it appears as juega (third person singular, present tense)."
+CASE A — The learner used one or more ${nativeLanguage} words (or non-Spanish words) instead of Spanish ones:
+Do NOT frame this as a mistake. It is completely normal not to know every word yet. For EVERY non-Spanish word the learner used in this segment, give a brief entry: the infinitive (for verbs) or base form (for nouns/adjectives), its basic translation(s), and the specific form used in this sentence (e.g. conjugation, gender, plural) if relevant. If there are multiple such words, cover all of them — one short entry each. Keep the total brief.
+Example tone: "Spielen — to play. Here: jugar. Used here as juega (third person singular, present). Freunde — friends. Here: amigos."
 
 CASE B — The learner used Spanish but with a grammatical error (wrong verb form, wrong tense, wrong article, wrong agreement, wrong word order, etc.):
 Address only the specific grammatical point. Be brief and direct. 1–2 sentences, 3 only if truly necessary.

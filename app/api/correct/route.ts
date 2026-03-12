@@ -138,6 +138,8 @@ Rules for is_match:
 
 Very important:
 - Always write numbers as words, never as digits — in all fields including local_version_es, local_segment, user_segment, and intended_meaning_native.
+- Each segment's local_segment and user_segment must NOT begin with a space and must NOT end with a space. Spacing between segments is handled by the UI.
+- The final segment in the pairs list must end with the sentence's closing punctuation (period, question mark, exclamation mark, etc.).
 - Do not output markdown.
 - Do not output explanations outside the JSON.
 - Do not output any field not listed above.
