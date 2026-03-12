@@ -9,6 +9,7 @@ interface CorrectionBlockProps {
 }
 
 export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBlockProps) {
+  const [selectedPair, setSelectedPair] = useState<Pair | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -19,11 +20,13 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
     // Toggle off if already selected
     if (selectedIndex === index) {
       setSelectedIndex(null);
+      setSelectedPair(null);
       setExplanation(null);
       return;
     }
 
     setSelectedIndex(index);
+    setSelectedPair(pair);
     setExplanation(null);
     setLoading(true);
 
@@ -48,7 +51,8 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
   }
 
   return (
-    <div className="w-full space-y-4">
+    <div className="w-full space-y-3">
+      {/* Segment display */}
       <div className="w-full rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
         <div
           className="text-lg leading-[3rem] text-neutral-900"
@@ -67,22 +71,68 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
         </div>
       </div>
 
-      {/* Explanation area — shown below the block when a mismatch is tapped */}
-      {(loading || explanation) && (
-        <div className="w-full rounded-2xl border border-neutral-200 bg-white px-6 py-4 shadow-sm text-sm text-neutral-700">
-          {loading ? (
-            <p className="flex items-center gap-2 text-neutral-400">
-              <span className="w-3 h-3 rounded-full border-2 border-neutral-300 border-t-neutral-600 animate-spin" />
-              Loading explanation…
-            </p>
-          ) : (
-            explanation
+      {/* Explanation panel */}
+      {(loading || explanation || selectedPair) && (
+        <div className="w-full rounded-2xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
+
+          {/* Context header */}
+          {selectedPair && (
+            <div className="flex items-stretch text-xs border-b border-neutral-100">
+              <div className="flex-1 px-4 py-2.5 bg-rose-50">
+                <p className="text-rose-400 font-medium mb-0.5">I said</p>
+                <p className="text-rose-600 font-mono">
+                  {selectedPair.user_segment.trim() || "—"}
+                </p>
+              </div>
+              <div className="w-px bg-neutral-100" />
+              <div className="flex-1 px-4 py-2.5 bg-green-50">
+                <p className="text-green-600 font-medium mb-0.5">Correct</p>
+                <p className="text-green-800 font-mono">
+                  {selectedPair.local_segment.trim()}
+                </p>
+              </div>
+            </div>
           )}
+
+          {/* Body */}
+          <div className="px-5 py-4 text-sm text-neutral-700">
+            {loading ? (
+              <p className="flex items-center gap-2 text-neutral-400">
+                <span className="w-3 h-3 rounded-full border-2 border-neutral-300 border-t-neutral-600 animate-spin" />
+                Loading explanation…
+              </p>
+            ) : explanation ? (
+              <FormattedText text={explanation} />
+            ) : null}
+          </div>
         </div>
       )}
     </div>
   );
 }
+
+// ── Lightweight markdown renderer: **bold** and line breaks ────────────────
+
+function FormattedText({ text }: { text: string }) {
+  return (
+    <div className="space-y-2">
+      {text.split(/\n+/).map((paragraph, i) => (
+        <p key={i} className="leading-relaxed">
+          {parseBold(paragraph)}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function parseBold(text: string): React.ReactNode[] {
+  const parts = text.split(/\*\*(.+?)\*\*/g);
+  return parts.map((part, i) =>
+    i % 2 === 1 ? <strong key={i} className="font-semibold text-neutral-900">{part}</strong> : part
+  );
+}
+
+// ── Pair chip ──────────────────────────────────────────────────────────────
 
 interface PairChipProps {
   pair: Pair;

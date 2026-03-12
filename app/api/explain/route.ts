@@ -9,22 +9,15 @@ function buildPrompt(
   userSegment: string,
   nativeLanguage: string
 ): string {
-  return `You are a calm, encouraging Spanish tutor. A learner (native language: ${nativeLanguage}) used a different word or form in one segment of a sentence. Your job is to give a brief, neutral note — not a correction lecture.
+  return `You are a helpful Spanish tutor. A learner is studying Spanish and wants feedback on a specific part of a sentence.
 
-Full sentence in natural Spanish: "${localVersionEs}"
-Correct segment: "${localSegment}"
-What the learner said: "${userSegment || "(nothing — left this out)"}"
+Full sentence (perfect Spanish): "${localVersionEs}"
+Correct version of this segment: "${localSegment}"
+What the learner said: "${userSegment || "(nothing — this part was left out)"}"
 
-Determine which case applies and respond accordingly in ${nativeLanguage}:
+Please provide helpful feedback in ${nativeLanguage} to help the learner understand and improve their Spanish. Feel free to cover whatever is most useful — vocabulary, grammar rules, usage, word forms, cultural context, or anything else that helps them grasp the difference and learn from it.
 
-CASE A — The learner used one or more ${nativeLanguage} words (or non-Spanish words) instead of Spanish ones:
-Do NOT frame this as a mistake. It is completely normal not to know every word yet. For EVERY non-Spanish word the learner used in this segment, give a brief entry: the infinitive (for verbs) or base form (for nouns/adjectives), its basic translation(s), and the specific form used in this sentence (e.g. conjugation, gender, plural) if relevant. If there are multiple such words, cover all of them — one short entry each. Keep the total brief.
-Example tone: "Spielen — to play. Here: jugar. Used here as juega (third person singular, present). Freunde — friends. Here: amigos."
-
-CASE B — The learner used Spanish but with a grammatical error (wrong verb form, wrong tense, wrong article, wrong agreement, wrong word order, etc.):
-Address only the specific grammatical point. Be brief and direct. 1–2 sentences, 3 only if truly necessary.
-
-Do not moralize, do not say "you made a mistake", do not re-explain the whole sentence. Write in plain text, no markdown.`;
+Use **bold** to highlight Spanish words, key terms, and important concepts. Structure your response with clear line breaks between distinct points.`;
 }
 
 export async function POST(req: NextRequest) {
@@ -42,7 +35,7 @@ export async function POST(req: NextRequest) {
     }
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       messages: [
         {
           role: "user",
@@ -50,7 +43,7 @@ export async function POST(req: NextRequest) {
         },
       ],
       temperature: 0.4,
-      max_tokens: 150,
+      max_tokens: 400,
     });
 
     const explanation = completion.choices[0].message.content?.trim() ?? "";
