@@ -15,9 +15,12 @@ Full sentence (perfect Spanish): "${localVersionEs}"
 Correct version of this segment: "${localSegment}"
 What the learner said: "${userSegment || "(nothing — this part was left out)"}"
 
-Please provide helpful feedback in ${nativeLanguage} to help the learner understand and improve their Spanish. Feel free to cover whatever is most useful — vocabulary, grammar rules, usage, word forms, cultural context, or anything else that helps them grasp the difference and learn from it.
+Provide feedback in ${nativeLanguage} to help the learner understand and improve. Cover whatever is most useful — vocabulary, grammar, usage, word forms, or anything else relevant. Use **bold** for Spanish words, key terms, and important concepts. Use line breaks between distinct points.
 
-Use **bold** to highlight Spanish words, key terms, and important concepts. Structure your response with clear line breaks between distinct points.`;
+Rules for your response:
+- Start directly with the feedback. No preamble, no "of course", no "great question", no meta-comments.
+- Be concise. Use as few sentences as the complexity warrants — simple cases get 1–2 sentences, complex ones up to 6. Never exceed 6 sentences.
+- Every sentence should add something concrete. Cut anything vague or filler.`;
 }
 
 export async function POST(req: NextRequest) {
@@ -43,7 +46,7 @@ export async function POST(req: NextRequest) {
         },
       ],
       temperature: 0.4,
-      max_tokens: 400,
+      max_tokens: 250,
     });
 
     const explanation = completion.choices[0].message.content?.trim() ?? "";
