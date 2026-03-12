@@ -154,9 +154,10 @@ Now process the learner transcript.`;
 
 export async function POST(req: NextRequest) {
   try {
-    const { transcript, nativeLanguage = "German" } = (await req.json()) as {
+    const { transcript, nativeLanguage = "German", overrideInterpretation } = (await req.json()) as {
       transcript: string;
       nativeLanguage?: string;
+      overrideInterpretation?: string;
     };
     console.log("[/api/correct] transcript:", JSON.stringify(transcript), "nativeLanguage:", nativeLanguage);
 
@@ -164,12 +165,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No speech detected — please try recording again" }, { status: 400 });
     }
 
+    const userMessage = overrideInterpretation
+      ? `${transcript}\n\n[The intended meaning has been confirmed by the user as: "${overrideInterpretation}". Use this verbatim as intended_meaning_native and base local_version_es and all pairs on this meaning, not on your own inference from the transcript.]`
+      : transcript;
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: buildSystemPrompt(nativeLanguage) },
-        { role: "user", content: transcript },
+        { role: "user", content: userMessage },
       ],
       temperature: 0.2,
     });

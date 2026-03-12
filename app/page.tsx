@@ -28,11 +28,15 @@ async function transcribeAudio(blob: Blob, nativeLanguage: NativeLanguage): Prom
   return transcript as string;
 }
 
-async function correctTranscript(transcript: string, nativeLanguage: NativeLanguage): Promise<CorrectionResult> {
+async function correctTranscript(
+  transcript: string,
+  nativeLanguage: NativeLanguage,
+  overrideInterpretation?: string,
+): Promise<CorrectionResult> {
   const res = await fetch("/api/correct", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ transcript, nativeLanguage }),
+    body: JSON.stringify({ transcript, nativeLanguage, overrideInterpretation }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -45,10 +49,23 @@ export default function Page() {
   const router = useRouter();
   const [status, setStatus] = useState<AppStatus>({ stage: "idle" });
   const [nativeLanguage, setNativeLanguage] = useState<NativeLanguage>("German");
+  const [editingInterpretation, setEditingInterpretation] = useState(false);
+  const [interpretationDraft, setInterpretationDraft] = useState("");
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
+  }
+
+  async function handleReCorrect(transcript: string, overrideInterpretation: string) {
+    setEditingInterpretation(false);
+    try {
+      setStatus({ stage: "correcting", transcript });
+      const result = await correctTranscript(transcript, nativeLanguage, overrideInterpretation);
+      setStatus({ stage: "done", result });
+    } catch (err) {
+      setStatus({ stage: "error", message: (err as Error).message });
+    }
   }
 
   async function handleRecordingComplete(blob: Blob) {
@@ -139,9 +156,41 @@ export default function Page() {
               <p className="text-xs text-neutral-400 uppercase tracking-wide mb-1">
                 What I think you tried to say
               </p>
-              <p className="text-base text-neutral-600">
-                {status.result.intended_meaning_native}
-              </p>
+              {editingInterpretation ? (
+                <div className="space-y-1">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={interpretationDraft}
+                    onChange={(e) => setInterpretationDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && interpretationDraft.trim()) {
+                        handleReCorrect(status.result.transcript_raw, interpretationDraft.trim());
+                      }
+                      if (e.key === "Escape") {
+                        setEditingInterpretation(false);
+                      }
+                    }}
+                    className="w-full text-base text-neutral-900 bg-transparent border-b border-neutral-300 focus:border-neutral-600 focus:outline-none py-0.5"
+                  />
+                  <p className="text-xs text-neutral-400">Press Enter to re-correct · Esc to cancel</p>
+                </div>
+              ) : (
+                <div className="flex items-baseline gap-2">
+                  <p className="text-base text-neutral-600">
+                    {status.result.intended_meaning_native}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setInterpretationDraft(status.result.intended_meaning_native);
+                      setEditingInterpretation(true);
+                    }}
+                    className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors shrink-0"
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Corrected Spanish block */}
@@ -149,7 +198,7 @@ export default function Page() {
 
             <div className="flex justify-center">
               <button
-                onClick={() => setStatus({ stage: "idle" })}
+                onClick={() => { setStatus({ stage: "idle" }); setEditingInterpretation(false); }}
                 className="text-xs text-neutral-400 hover:text-neutral-600 underline underline-offset-2 transition-colors"
               >
                 Try again
