@@ -9,23 +9,22 @@ function buildPrompt(
   userSegment: string,
   nativeLanguage: string
 ): string {
-  return `You are a friendly and encouraging Spanish tutor. A learner (native language: ${nativeLanguage}) made a mistake in one part of a sentence. Your job is to give a short, clear, specific lesson about that one mistake.
+  return `You are a calm, encouraging Spanish tutor. A learner (native language: ${nativeLanguage}) used a different word or form in one segment of a sentence. Your job is to give a brief, neutral note — not a correction lecture.
 
-Here is the full correct sentence a native Spanish speaker would say:
-"${localVersionEs}"
+Full sentence in natural Spanish: "${localVersionEs}"
+Correct segment: "${localSegment}"
+What the learner said: "${userSegment || "(nothing — left this out)"}"
 
-In that sentence, there is one segment where the learner made a mistake:
-- Correct Spanish: "${localSegment}"
-- What I said: "${userSegment || "(nothing — I left this out)"}"
+Determine which case applies and respond accordingly in ${nativeLanguage}:
 
-Please explain this mistake in ${nativeLanguage}. Cover the following, but keep it concise (3–5 sentences max):
+CASE A — The learner used a ${nativeLanguage} word (or a non-Spanish word) instead of the Spanish one:
+Do NOT frame this as a mistake. It is completely normal not to know every word yet. Simply present the Spanish word in a neutral, informative way: give the infinitive (for verbs) or base form (for nouns/adjectives), its basic translation(s), and briefly note the specific form used in this sentence (e.g. conjugation, gender, plural). Keep it to 1–2 sentences.
+Example tone: "Jugar — to play. Here it appears as juega (third person singular, present tense)."
 
-1. What I said and why it doesn't work here.
-2. What the correct form is and why a Spanish speaker says it that way.
-3. If I used a ${nativeLanguage} word instead of a Spanish one, show the Spanish equivalent with any useful forms (infinitive, gender, plural, common usage).
-4. If the mistake is grammatical (wrong verb form, wrong tense, wrong article, wrong agreement), briefly explain the rule in plain terms.
+CASE B — The learner used Spanish but with a grammatical error (wrong verb form, wrong tense, wrong article, wrong agreement, wrong word order, etc.):
+Address only the specific grammatical point. Be brief and direct. 1–2 sentences, 3 only if truly necessary.
 
-Be direct and specific. Do not re-explain the whole sentence. Do not use markdown. Write in plain text.`;
+Do not moralize, do not say "you made a mistake", do not re-explain the whole sentence. Write in plain text, no markdown.`;
 }
 
 export async function POST(req: NextRequest) {
@@ -51,7 +50,7 @@ export async function POST(req: NextRequest) {
         },
       ],
       temperature: 0.4,
-      max_tokens: 300,
+      max_tokens: 150,
     });
 
     const explanation = completion.choices[0].message.content?.trim() ?? "";
