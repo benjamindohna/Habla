@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Fragment } from "react";
+import { useState, useEffect, Fragment } from "react";
 import type { CorrectionResult, Pair } from "@/types/correction";
 
 interface CorrectionBlockProps {
@@ -13,6 +13,15 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [cache, setCache] = useState<Record<number, string>>({});
+
+  // Clear everything when a new result arrives (new recording)
+  useEffect(() => {
+    setCache({});
+    setSelectedIndex(null);
+    setSelectedPair(null);
+    setExplanation(null);
+  }, [result]);
 
   async function handlePairClick(pair: Pair, index: number) {
     if (pair.is_match) return;
@@ -27,6 +36,13 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
 
     setSelectedIndex(index);
     setSelectedPair(pair);
+
+    // Serve from cache if already fetched
+    if (cache[index] !== undefined) {
+      setExplanation(cache[index]);
+      return;
+    }
+
     setExplanation(null);
     setLoading(true);
 
@@ -42,7 +58,9 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
         }),
       });
       const data = await res.json();
-      setExplanation(data.explanation ?? "Could not load explanation.");
+      const text = data.explanation ?? "Could not load explanation.";
+      setCache(prev => ({ ...prev, [index]: text }));
+      setExplanation(text);
     } catch {
       setExplanation("Could not load explanation.");
     } finally {
