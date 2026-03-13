@@ -99,11 +99,8 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
       audioRef.current = null;
     }
 
-    const nextCount = playCount + 1;
-    setPlayCount(nextCount);
-
-    // Even clicks are slow (0.75×), odd clicks are normal speed (1.0×)
-    const speedKey = nextCount % 2 === 0 ? "slow" : "normal";
+    // Speed alternates only when playback completes fully — use current count to decide
+    const speedKey = playCount % 2 === 0 ? "normal" : "slow";
     const speed = speedKey === "slow" ? 0.75 : 1.0;
 
     // Use cached blob if available — text only changes on a new recording
@@ -131,14 +128,16 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
     audioRef.current = audio;
     audio.onended = () => {
       URL.revokeObjectURL(url);
+      // Only advance the counter when the full sentence was heard
+      setPlayCount(c => c + 1);
       setIsPlaying(false);
     };
     audio.play();
     setIsPlaying(true);
   }
 
-  // Next click will be slow if the upcoming count is even
-  const nextIsSlow = (playCount + 1) % 2 === 0;
+  // Next play will be slow if playCount is currently even (0, 2, 4 → next is odd → slow)
+  const nextIsSlow = playCount % 2 === 1;
   const speakLabel = ttsLoading
     ? "Generating audio…"
     : isPlaying
