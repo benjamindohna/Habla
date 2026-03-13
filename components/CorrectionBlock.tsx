@@ -16,8 +16,11 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
   const [cache, setCache] = useState<Record<number, string>>({});
 
   const [ttsLoading, setTtsLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [playCount, setPlayCount] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Cached blobs per speed so repeated clicks skip the API call
+  const blobCacheRef = useRef<{ normal?: Blob; slow?: Blob }>({});
 
   // Clear everything when a new result arrives (new recording)
   useEffect(() => {
@@ -26,6 +29,8 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
     setSelectedPair(null);
     setExplanation(null);
     setPlayCount(0);
+    setIsPlaying(false);
+    blobCacheRef.current = {};
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
@@ -77,6 +82,14 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
     }
   }
 
+  function handleStop() {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setIsPlaying(false);
+  }
+
   async function handleSpeak() {
     if (ttsLoading) return;
 
@@ -90,33 +103,46 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
     setPlayCount(nextCount);
 
     // Even clicks are slow (0.75×), odd clicks are normal speed (1.0×)
-    const speed = nextCount % 2 === 0 ? 0.75 : 1.0;
+    const speedKey = nextCount % 2 === 0 ? "slow" : "normal";
+    const speed = speedKey === "slow" ? 0.75 : 1.0;
 
-    setTtsLoading(true);
-    try {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: result.local_version_es, speed }),
-      });
-      if (!res.ok) throw new Error("TTS failed");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.play();
-      audio.onended = () => URL.revokeObjectURL(url);
-    } catch {
-      // noop — button simply returns to idle
-    } finally {
+    // Use cached blob if available — text only changes on a new recording
+    let blob = blobCacheRef.current[speedKey];
+    if (!blob) {
+      setTtsLoading(true);
+      try {
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: result.local_version_es, speed }),
+        });
+        if (!res.ok) throw new Error("TTS failed");
+        blob = await res.blob();
+        blobCacheRef.current[speedKey] = blob;
+      } catch {
+        setTtsLoading(false);
+        return;
+      }
       setTtsLoading(false);
     }
+
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      setIsPlaying(false);
+    };
+    audio.play();
+    setIsPlaying(true);
   }
 
   // Next click will be slow if the upcoming count is even
   const nextIsSlow = (playCount + 1) % 2 === 0;
   const speakLabel = ttsLoading
     ? "Generating audio…"
+    : isPlaying
+    ? "Stop"
     : nextIsSlow
     ? "Play sentence (slow)"
     : "Play sentence";
@@ -127,13 +153,13 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
       <div className="relative w-full rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
         {/* TTS button */}
         <button
-          onClick={handleSpeak}
+          onClick={isPlaying ? handleStop : handleSpeak}
           disabled={ttsLoading}
           aria-label={speakLabel}
           title={speakLabel}
           className="absolute top-3.5 right-3.5 p-1.5 rounded-lg text-neutral-300 hover:text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {ttsLoading ? <TtsSpinner /> : <SpeakerIcon slow={nextIsSlow} />}
+          {ttsLoading ? <TtsSpinner /> : isPlaying ? <StopIcon /> : <SpeakerIcon slow={nextIsSlow} />}
         </button>
 
         <div
@@ -198,6 +224,14 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
 function TtsSpinner() {
   return (
     <span className="block w-4 h-4 rounded-full border-2 border-neutral-200 border-t-neutral-500 animate-spin" />
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+      <rect x="4" y="4" width="12" height="12" rx="2" />
+    </svg>
   );
 }
 
