@@ -9,7 +9,6 @@ export interface Pair {
   local_segment: string;
   user_segment: string;
   is_match: boolean;
-  comment_native: string;
 }
 
 /**

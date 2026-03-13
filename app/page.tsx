@@ -9,56 +9,104 @@ import type { CorrectionResult } from "@/types/correction";
 const NATIVE_LANGUAGES = ["English", "German", "Italian", "French", "Greek"] as const;
 type NativeLanguage = (typeof NATIVE_LANGUAGES)[number];
 
-
 type AppStatus =
   | { stage: "idle" }
-  | { stage: "transcribing" }
-  | { stage: "correcting"; transcript: string }
+  | { stage: "processing"; step: string; transcript?: string }
   | { stage: "done"; result: CorrectionResult }
   | { stage: "error"; message: string };
+
+// ── API helpers ────────────────────────────────────────────────────────────
 
 async function transcribeAudio(blob: Blob, nativeLanguage: NativeLanguage): Promise<string> {
   const form = new FormData();
   form.append("audio", blob, "recording.webm");
   form.append("nativeLanguage", nativeLanguage);
-
   const res = await fetch("/api/transcribe", { method: "POST", body: form });
   if (!res.ok) throw new Error("Transcription failed");
   const { transcript } = await res.json();
   return transcript as string;
 }
 
-async function correctTranscript(transcript: string, nativeLanguage: NativeLanguage): Promise<CorrectionResult> {
-  const res = await fetch("/api/correct", {
+async function interpretTranscript(
+  transcript: string,
+  nativeLanguage: NativeLanguage,
+): Promise<{ intended_meaning_native: string; confidence: string; notes_native: string }> {
+  const res = await fetch("/api/interpret", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ transcript, nativeLanguage }),
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error ?? "Correction failed");
-  }
-  return res.json() as Promise<CorrectionResult>;
+  if (!res.ok) throw new Error("Interpretation failed");
+  return res.json();
 }
+
+async function localizeInterpretation(intendedMeaning: string): Promise<string> {
+  const res = await fetch("/api/localize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ intendedMeaning }),
+  });
+  if (!res.ok) throw new Error("Localization failed");
+  const { local_version_es } = await res.json();
+  return local_version_es as string;
+}
+
+async function segmentSentences(
+  transcript: string,
+  localVersionEs: string,
+  nativeLanguage: NativeLanguage,
+): Promise<import("@/types/correction").Pair[]> {
+  const res = await fetch("/api/segment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript, localVersionEs, nativeLanguage }),
+  });
+  if (!res.ok) throw new Error("Segmentation failed");
+  const { pairs } = await res.json();
+  return pairs;
+}
+
+// ── Component ──────────────────────────────────────────────────────────────
 
 export default function Page() {
   const router = useRouter();
   const [status, setStatus] = useState<AppStatus>({ stage: "idle" });
   const [nativeLanguage, setNativeLanguage] = useState<NativeLanguage>("German");
+  const [editingInterpretation, setEditingInterpretation] = useState(false);
+  const [interpretationDraft, setInterpretationDraft] = useState("");
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
   }
 
-  async function handleRecordingComplete(blob: Blob) {
+  async function runPipeline(
+    transcript: string,
+    overrideInterpretation?: string,
+  ) {
     try {
-      setStatus({ stage: "transcribing" });
-      const transcript = await transcribeAudio(blob, nativeLanguage);
+      // Step 2: interpret
+      setStatus({ stage: "processing", step: "Interpreting…", transcript });
+      const interpretation = overrideInterpretation
+        ? { intended_meaning_native: overrideInterpretation, confidence: "high", notes_native: "" }
+        : await interpretTranscript(transcript, nativeLanguage);
 
-      console.log("[transcript]", transcript);
-      setStatus({ stage: "correcting", transcript });
-      const result = await correctTranscript(transcript, nativeLanguage);
+      // Step 3: localize
+      setStatus({ stage: "processing", step: "Translating to Spanish…", transcript });
+      const local_version_es = await localizeInterpretation(interpretation.intended_meaning_native);
+
+      // Step 4: segment
+      setStatus({ stage: "processing", step: "Comparing versions…", transcript });
+      const pairs = await segmentSentences(transcript, local_version_es, nativeLanguage);
+
+      const result: CorrectionResult = {
+        transcript_raw: transcript,
+        intended_meaning_native: interpretation.intended_meaning_native,
+        local_version_es,
+        confidence: interpretation.confidence as CorrectionResult["confidence"],
+        notes_native: interpretation.notes_native,
+        pairs,
+      };
 
       setStatus({ stage: "done", result });
     } catch (err) {
@@ -66,12 +114,27 @@ export default function Page() {
     }
   }
 
-  const isProcessing = status.stage === "transcribing" || status.stage === "correcting";
+  async function handleRecordingComplete(blob: Blob) {
+    try {
+      setStatus({ stage: "processing", step: "Transcribing audio…" });
+      const transcript = await transcribeAudio(blob, nativeLanguage);
+      await runPipeline(transcript);
+    } catch (err) {
+      setStatus({ stage: "error", message: (err as Error).message });
+    }
+  }
+
+  async function handleReCorrect(transcript: string, overrideInterpretation: string) {
+    setEditingInterpretation(false);
+    await runPipeline(transcript, overrideInterpretation);
+  }
+
+  const isProcessing = status.stage === "processing";
 
   return (
     <main className="flex min-h-screen flex-col items-center px-4 py-8">
 
-      {/* Selectors — top center, minimal */}
+      {/* Top bar */}
       <div className="w-full max-w-xl flex items-center justify-between mb-12">
         <div className="flex items-center gap-2">
           <label htmlFor="lang-select" className="text-xs text-neutral-400">
@@ -97,7 +160,7 @@ export default function Page() {
         </button>
       </div>
 
-      {/* Main content — vertically centered */}
+      {/* Main content */}
       <div className="w-full max-w-xl flex flex-col items-center gap-8 flex-1 justify-center">
 
         {/* Header */}
@@ -114,18 +177,19 @@ export default function Page() {
           disabled={isProcessing}
         />
 
-        {/* Status feedback */}
-        {status.stage === "transcribing" && (
-          <StatusLine>Transcribing audio&hellip;</StatusLine>
-        )}
-        {status.stage === "correcting" && (
+        {/* Processing status */}
+        {status.stage === "processing" && (
           <div className="space-y-2 text-center">
-            <StatusLine>Correcting&hellip;</StatusLine>
-            <p className="text-sm text-neutral-400 italic">
-              &ldquo;{status.transcript}&rdquo;
-            </p>
+            <StatusLine>{status.step}</StatusLine>
+            {status.transcript && (
+              <p className="text-sm text-neutral-400 italic">
+                &ldquo;{status.transcript}&rdquo;
+              </p>
+            )}
           </div>
         )}
+
+        {/* Error */}
         {status.stage === "error" && (
           <p className="text-center text-sm text-red-500">{status.message}</p>
         )}
@@ -134,22 +198,52 @@ export default function Page() {
         {status.stage === "done" && (
           <div className="w-full space-y-4">
 
-            {/* Interpretation in native language */}
+            {/* Interpretation */}
             <div className="px-1">
               <p className="text-xs text-neutral-400 uppercase tracking-wide mb-1">
                 What I think you tried to say
               </p>
-              <p className="text-base text-neutral-600">
-                {status.result.intended_meaning_native}
-              </p>
+              {editingInterpretation ? (
+                <div className="space-y-1">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={interpretationDraft}
+                    onChange={(e) => setInterpretationDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && interpretationDraft.trim()) {
+                        handleReCorrect(status.result.transcript_raw, interpretationDraft.trim());
+                      }
+                      if (e.key === "Escape") setEditingInterpretation(false);
+                    }}
+                    className="w-full text-base text-neutral-900 bg-transparent border-b border-neutral-300 focus:border-neutral-600 focus:outline-none py-0.5"
+                  />
+                  <p className="text-xs text-neutral-400">Press Enter to re-correct · Esc to cancel</p>
+                </div>
+              ) : (
+                <div className="flex items-baseline gap-2">
+                  <p className="text-base text-neutral-600">
+                    {status.result.intended_meaning_native}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setInterpretationDraft(status.result.intended_meaning_native);
+                      setEditingInterpretation(true);
+                    }}
+                    className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors shrink-0"
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Corrected Spanish block */}
-            <CorrectionBlock result={status.result} />
+            <CorrectionBlock result={status.result} nativeLanguage={nativeLanguage} />
 
             <div className="flex justify-center">
               <button
-                onClick={() => setStatus({ stage: "idle" })}
+                onClick={() => { setStatus({ stage: "idle" }); setEditingInterpretation(false); }}
                 className="text-xs text-neutral-400 hover:text-neutral-600 underline underline-offset-2 transition-colors"
               >
                 Try again
