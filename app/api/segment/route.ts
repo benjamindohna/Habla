@@ -49,6 +49,8 @@ Alignment rules:
 17. If something is missing in the learner version, use an empty string for user_segment.
 18. If the learner said something extra that does not belong in the local version, attach it to the most relevant pair.
 19. Prefer pedagogical usefulness over mechanical diffing.
+20. Commas and inline punctuation (,  ;  :) must NEVER appear as standalone segments. Always attach them to the segment that immediately precedes them. A segment whose entire content is punctuation is always wrong.
+21. When deciding is_match, ignore trailing punctuation entirely. If two segments are identical except that one has a trailing comma and the other does not, they are a match. Punctuation differences alone must never cause a mismatch.
 
 Matching examples (learner language: German):
 - Learner: "con mi Freunde" / LOCAL: "con mis amigos" → "con" matched, "mis amigos" vs "mi Freunde" mismatch
@@ -79,6 +81,47 @@ Return ONLY valid JSON:
 }`;
 }
 
+/**
+ * Post-processing guard so punctuation quirks in the model output never
+ * produce visible artefacts in the UI:
+ *
+ *  Pass 1 — absorb any standalone-punctuation pair (local_segment is only
+ *            commas / colons / semicolons) into the preceding pair.
+ *  Pass 2 — pairs that differ only by trailing punctuation are re-marked
+ *            as matches, because the learner cannot be expected to say
+ *            punctuation when speaking.
+ */
+function normalizePairs(pairs: Pair[]): Pair[] {
+  const isPuncOnly = (s: string) => /^[,;:]+$/.test(s.trim());
+  const stripTrailing = (s: string) => s.trim().replace(/[,;:.!?¿¡]+$/, "").trimEnd();
+
+  // Pass 1: merge lone-punctuation segments into the preceding pair
+  const merged: Pair[] = [];
+  for (const pair of pairs) {
+    if (isPuncOnly(pair.local_segment) && merged.length > 0) {
+      const prev = merged[merged.length - 1];
+      merged[merged.length - 1] = {
+        local_segment: prev.local_segment + pair.local_segment,
+        user_segment: prev.user_segment + pair.user_segment,
+        is_match: prev.is_match,
+      };
+    } else {
+      merged.push({ ...pair });
+    }
+  }
+
+  // Pass 2: re-evaluate is_match when segments differ only by trailing punctuation
+  return merged.map(pair => {
+    if (pair.is_match) return pair;
+    const localCore = stripTrailing(pair.local_segment).toLowerCase();
+    const userCore = stripTrailing(pair.user_segment).toLowerCase();
+    if (localCore.length > 0 && localCore === userCore) {
+      return { ...pair, is_match: true };
+    }
+    return pair;
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { transcript, localVersionEs, nativeLanguage = "German" } = (await req.json()) as {
@@ -102,7 +145,7 @@ export async function POST(req: NextRequest) {
 
     const raw = completion.choices[0].message.content ?? "{}";
     const { pairs } = JSON.parse(raw) as { pairs: Pair[] };
-    return NextResponse.json({ pairs });
+    return NextResponse.json({ pairs: normalizePairs(pairs) });
   } catch (err) {
     console.error("[/api/segment]", err);
     return NextResponse.json({ error: "Segmentation failed" }, { status: 500 });
