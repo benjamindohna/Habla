@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import type { CorrectionResult, Pair } from "@/types/correction";
 
 interface CorrectionBlockProps {
@@ -15,12 +15,21 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
   const [loading, setLoading] = useState(false);
   const [cache, setCache] = useState<Record<number, string>>({});
 
+  const [ttsLoading, setTtsLoading] = useState(false);
+  const [playCount, setPlayCount] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   // Clear everything when a new result arrives (new recording)
   useEffect(() => {
     setCache({});
     setSelectedIndex(null);
     setSelectedPair(null);
     setExplanation(null);
+    setPlayCount(0);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
   }, [result]);
 
   async function handlePairClick(pair: Pair, index: number) {
@@ -68,12 +77,67 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
     }
   }
 
+  async function handleSpeak() {
+    if (ttsLoading) return;
+
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    const nextCount = playCount + 1;
+    setPlayCount(nextCount);
+
+    // Even clicks are slow (0.75×), odd clicks are normal speed (1.0×)
+    const speed = nextCount % 2 === 0 ? 0.75 : 1.0;
+
+    setTtsLoading(true);
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: result.local_version_es, speed }),
+      });
+      if (!res.ok) throw new Error("TTS failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.play();
+      audio.onended = () => URL.revokeObjectURL(url);
+    } catch {
+      // noop — button simply returns to idle
+    } finally {
+      setTtsLoading(false);
+    }
+  }
+
+  // Next click will be slow if the upcoming count is even
+  const nextIsSlow = (playCount + 1) % 2 === 0;
+  const speakLabel = ttsLoading
+    ? "Generating audio…"
+    : nextIsSlow
+    ? "Play sentence (slow)"
+    : "Play sentence";
+
   return (
     <div className="w-full space-y-3">
       {/* Segment display */}
-      <div className="w-full rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
+      <div className="relative w-full rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
+        {/* TTS button */}
+        <button
+          onClick={handleSpeak}
+          disabled={ttsLoading}
+          aria-label={speakLabel}
+          title={speakLabel}
+          className="absolute top-3.5 right-3.5 p-1.5 rounded-lg text-neutral-300 hover:text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {ttsLoading ? <TtsSpinner /> : <SpeakerIcon slow={nextIsSlow} />}
+        </button>
+
         <div
-          className="text-lg leading-[3rem] text-neutral-900"
+          className="text-lg leading-[3rem] text-neutral-900 pr-8"
           aria-label="Corrected sentence"
         >
           {result.pairs.map((pair, i) => (
@@ -126,6 +190,35 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
         </div>
       )}
     </div>
+  );
+}
+
+// ── TTS icons ──────────────────────────────────────────────────────────────
+
+function TtsSpinner() {
+  return (
+    <span className="block w-4 h-4 rounded-full border-2 border-neutral-200 border-t-neutral-500 animate-spin" />
+  );
+}
+
+// Speaker icon; shows a small turtle badge when the next click will be slow
+function SpeakerIcon({ slow }: { slow: boolean }) {
+  return (
+    <span className="relative block w-4 h-4">
+      <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+        <path d="M9.25 3.35a.75.75 0 00-1.23-.573L4.18 6.25H2.75A.75.75 0 002 7v6a.75.75 0 00.75.75H4.18l3.84 3.473A.75.75 0 009.25 16.65V3.35z" />
+        <path d="M13.537 5.963a.75.75 0 00-1.06 1.061 4.5 4.5 0 010 5.952.75.75 0 001.06 1.06 6 6 0 000-8.073z" />
+        <path d="M15.66 3.84a.75.75 0 00-1.06 1.06 7.5 7.5 0 010 10.2.75.75 0 001.06 1.06 9 9 0 000-12.32z" />
+      </svg>
+      {slow && (
+        <span
+          className="absolute -bottom-1 -right-1 text-[8px] leading-none"
+          aria-hidden="true"
+        >
+          🐢
+        </span>
+      )}
+    </span>
   );
 }
 
