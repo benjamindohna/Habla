@@ -1,13 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AudioRecorder from "@/components/AudioRecorder";
 import CorrectionBlock from "@/components/CorrectionBlock";
+import TopicGrid from "@/components/TopicGrid";
 import type { CorrectionResult } from "@/types/correction";
 
-const NATIVE_LANGUAGES = ["English", "German", "Italian", "French", "Greek"] as const;
-type NativeLanguage = (typeof NATIVE_LANGUAGES)[number];
+// Placeholder tiles for Phase 2. Phase 3 replaces these with LLM-generated topics.
+const PLACEHOLDER_TOPICS = [
+  "Football",
+  "Cars",
+  "Psychology",
+  "Space",
+  "Sci-fi novels",
+  "Technology",
+  "Music",
+  "Travel",
+  "Cooking",
+];
+
+interface Me {
+  id: number;
+  email: string;
+  nativeLanguage: string;
+  level: number;
+  interests: string[];
+  interestsText: string;
+}
+
+type AppMode = { kind: "home" } | { kind: "chat"; topic: string };
 
 type AppStatus =
   | { stage: "idle" }
@@ -17,7 +39,7 @@ type AppStatus =
 
 // ── API helpers ────────────────────────────────────────────────────────────
 
-async function transcribeAudio(blob: Blob, nativeLanguage: NativeLanguage): Promise<string> {
+async function transcribeAudio(blob: Blob, nativeLanguage: string): Promise<string> {
   const form = new FormData();
   form.append("audio", blob, "recording.webm");
   form.append("nativeLanguage", nativeLanguage);
@@ -29,7 +51,7 @@ async function transcribeAudio(blob: Blob, nativeLanguage: NativeLanguage): Prom
 
 async function interpretTranscript(
   transcript: string,
-  nativeLanguage: NativeLanguage,
+  nativeLanguage: string,
 ): Promise<{ intended_meaning_native: string; confidence: string; notes_native: string }> {
   const res = await fetch("/api/interpret", {
     method: "POST",
@@ -54,7 +76,7 @@ async function localizeInterpretation(intendedMeaning: string): Promise<string> 
 async function segmentSentences(
   transcript: string,
   localVersionEs: string,
-  nativeLanguage: NativeLanguage,
+  nativeLanguage: string,
 ): Promise<import("@/types/correction").Pair[]> {
   const res = await fetch("/api/segment", {
     method: "POST",
@@ -70,34 +92,57 @@ async function segmentSentences(
 
 export default function Page() {
   const router = useRouter();
+  const [me, setMe] = useState<Me | null>(null);
+  const [mode, setMode] = useState<AppMode>({ kind: "home" });
   const [status, setStatus] = useState<AppStatus>({ stage: "idle" });
-  const [nativeLanguage, setNativeLanguage] = useState<NativeLanguage>("German");
   const [editingInterpretation, setEditingInterpretation] = useState(false);
   const [interpretationDraft, setInterpretationDraft] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load profile"))))
+      .then((data: Me) => {
+        if (!cancelled) setMe(data);
+      })
+      .catch(() => {
+        if (!cancelled) router.push("/login");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
   }
 
-  async function runPipeline(
-    transcript: string,
-    overrideInterpretation?: string,
-  ) {
+  function enterChat(topic: string) {
+    setStatus({ stage: "idle" });
+    setEditingInterpretation(false);
+    setMode({ kind: "chat", topic });
+  }
+
+  function backToHome() {
+    setStatus({ stage: "idle" });
+    setEditingInterpretation(false);
+    setMode({ kind: "home" });
+  }
+
+  async function runPipeline(transcript: string, overrideInterpretation?: string) {
+    if (!me) return;
     try {
-      // Step 2: interpret
       setStatus({ stage: "processing", step: "Interpreting…", transcript });
       const interpretation = overrideInterpretation
         ? { intended_meaning_native: overrideInterpretation, confidence: "high", notes_native: "" }
-        : await interpretTranscript(transcript, nativeLanguage);
+        : await interpretTranscript(transcript, me.nativeLanguage);
 
-      // Step 3: localize
       setStatus({ stage: "processing", step: "Translating to Spanish…", transcript });
       const local_version_es = await localizeInterpretation(interpretation.intended_meaning_native);
 
-      // Step 4: segment
       setStatus({ stage: "processing", step: "Comparing versions…", transcript });
-      const pairs = await segmentSentences(transcript, local_version_es, nativeLanguage);
+      const pairs = await segmentSentences(transcript, local_version_es, me.nativeLanguage);
 
       const result: CorrectionResult = {
         transcript_raw: transcript,
@@ -107,7 +152,6 @@ export default function Page() {
         notes_native: interpretation.notes_native,
         pairs,
       };
-
       setStatus({ stage: "done", result });
     } catch (err) {
       setStatus({ stage: "error", message: (err as Error).message });
@@ -115,9 +159,10 @@ export default function Page() {
   }
 
   async function handleRecordingComplete(blob: Blob) {
+    if (!me) return;
     try {
       setStatus({ stage: "processing", step: "Transcribing audio…" });
-      const transcript = await transcribeAudio(blob, nativeLanguage);
+      const transcript = await transcribeAudio(blob, me.nativeLanguage);
       await runPipeline(transcript);
     } catch (err) {
       setStatus({ stage: "error", message: (err as Error).message });
@@ -129,29 +174,69 @@ export default function Page() {
     await runPipeline(transcript, overrideInterpretation);
   }
 
+  // ── Loading ─────────────────────────────────────────────────────────────
+  if (!me) {
+    return (
+      <main className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-neutral-400">Loading…</p>
+      </main>
+    );
+  }
+
+  // ── Home mode ───────────────────────────────────────────────────────────
+  if (mode.kind === "home") {
+    const interestsLine = me.interestsText.trim() || me.interests.join(", ");
+    return (
+      <main className="flex min-h-screen flex-col items-center px-4 py-8">
+        <div className="w-full max-w-xl flex items-center justify-end mb-12">
+          <button
+            onClick={handleLogout}
+            className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
+
+        <div className="w-full max-w-xl flex flex-col items-center gap-8 flex-1">
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Hola, ¿de qué quieres hablar hoy?
+            </h1>
+            {interestsLine && (
+              <p className="text-xs text-neutral-400 italic">
+                Tus intereses: {interestsLine}
+              </p>
+            )}
+          </div>
+
+          <TopicGrid topics={PLACEHOLDER_TOPICS} onSelect={enterChat} />
+
+          <button
+            onClick={() => { /* Phase 4 will wire re-roll */ }}
+            disabled
+            className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Re-roll comes in Phase 4"
+          >
+            Re-roll topics
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  // ── Chat mode (existing single-sentence flow as placeholder) ────────────
   const isProcessing = status.stage === "processing";
 
   return (
     <main className="flex min-h-screen flex-col items-center px-4 py-8">
-
-      {/* Top bar */}
       <div className="w-full max-w-xl flex items-center justify-between mb-12">
-        <div className="flex items-center gap-2">
-          <label htmlFor="lang-select" className="text-xs text-neutral-400">
-            Native language
-          </label>
-          <select
-            id="lang-select"
-            value={nativeLanguage}
-            onChange={(e) => setNativeLanguage(e.target.value as NativeLanguage)}
-            className="text-xs text-neutral-500 bg-transparent border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:border-neutral-400 cursor-pointer"
-          >
-            {NATIVE_LANGUAGES.map((lang) => (
-              <option key={lang} value={lang}>{lang}</option>
-            ))}
-          </select>
-        </div>
-
+        <button
+          onClick={backToHome}
+          className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
+        >
+          ← Back
+        </button>
+        <p className="text-xs text-neutral-500">{mode.topic}</p>
         <button
           onClick={handleLogout}
           className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
@@ -160,24 +245,9 @@ export default function Page() {
         </button>
       </div>
 
-      {/* Main content */}
       <div className="w-full max-w-xl flex flex-col items-center gap-8 flex-1 justify-center">
+        <AudioRecorder onRecordingComplete={handleRecordingComplete} disabled={isProcessing} />
 
-        {/* Header */}
-        <div className="text-center space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Habla</h1>
-          <p className="text-sm text-neutral-500">
-            Speak in Spanish — mix in your language for words you don&rsquo;t know yet.
-          </p>
-        </div>
-
-        {/* Recorder */}
-        <AudioRecorder
-          onRecordingComplete={handleRecordingComplete}
-          disabled={isProcessing}
-        />
-
-        {/* Processing status */}
         {status.stage === "processing" && (
           <div className="space-y-2 text-center">
             <StatusLine>{status.step}</StatusLine>
@@ -189,16 +259,12 @@ export default function Page() {
           </div>
         )}
 
-        {/* Error */}
         {status.stage === "error" && (
           <p className="text-center text-sm text-red-500">{status.message}</p>
         )}
 
-        {/* Result */}
         {status.stage === "done" && (
           <div className="w-full space-y-4">
-
-            {/* Interpretation */}
             <div className="px-1">
               <p className="text-xs text-neutral-400 uppercase tracking-wide mb-1">
                 What I think you tried to say
@@ -238,8 +304,7 @@ export default function Page() {
               )}
             </div>
 
-            {/* Corrected Spanish block */}
-            <CorrectionBlock result={status.result} nativeLanguage={nativeLanguage} />
+            <CorrectionBlock result={status.result} nativeLanguage={me.nativeLanguage} />
 
             <div className="flex justify-center">
               <button
@@ -251,7 +316,6 @@ export default function Page() {
             </div>
           </div>
         )}
-
       </div>
     </main>
   );

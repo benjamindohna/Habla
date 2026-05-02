@@ -4,6 +4,16 @@ import { jwtVerify } from "jose";
 
 const PUBLIC_PATHS = ["/login", "/api/auth"];
 
+function unauthorizedResponse(request: NextRequest, clearCookie: boolean): NextResponse {
+  // API requests get a JSON 401; page navigations get redirected to /login.
+  const isApi = request.nextUrl.pathname.startsWith("/api");
+  const response = isApi
+    ? NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+    : NextResponse.redirect(new URL("/login", request.url));
+  if (clearCookie) response.cookies.delete("auth-token");
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -15,7 +25,7 @@ export async function middleware(request: NextRequest) {
   const token = request.cookies.get("auth-token")?.value;
 
   if (!token) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return unauthorizedResponse(request, false);
   }
 
   try {
@@ -25,9 +35,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   } catch {
     // Token invalid, expired, or in legacy shape — force re-login.
-    const response = NextResponse.redirect(new URL("/login", request.url));
-    response.cookies.delete("auth-token");
-    return response;
+    return unauthorizedResponse(request, true);
   }
 }
 
