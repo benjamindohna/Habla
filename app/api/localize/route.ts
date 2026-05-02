@@ -19,11 +19,11 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "system",
-          content: `You are a native Spanish speaker. Your only job is to express the given meaning in natural, everyday Spanish exactly as an average local Spaniard would say it in casual conversation.
+          content: `You are a native Spanish speaker. Your job is to express the given meaning in natural, everyday Spanish as an average local Spaniard would say it in casual conversation.
 
 Rules:
 - Not textbook Spanish. Not overly formal. Natural, local, everyday speech.
-- Do not add or remove meaning — express exactly what is given, nothing more.
+- Preserve meaning as much as possible. The meaning of the output should match the meaning of the given input exactly, leaving nothing out and adding nothing new.
 - Always write numbers as words, never as digits.
 - The sentence must end with appropriate punctuation (period, question mark, or exclamation mark).
 
