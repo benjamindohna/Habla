@@ -57,11 +57,14 @@ CREATE TABLE IF NOT EXISTS users (
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
--- structured interest tags, one row per tag
+-- structured interest tags, one row per tag. Capped at ~12 entries by the
+-- post-chat curation step (see §3.8); is_recent flags the 3–5 currently
+-- active interests so the topic prompt can favour them.
 CREATE TABLE IF NOT EXISTS user_interests (
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   interest   TEXT NOT NULL,
   added_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  is_recent  INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (user_id, interest)
 );
 
@@ -147,14 +150,28 @@ Sample seed list (will be expanded to ~40–60 entries):
 
 A `pickGreetingVerb(level)` helper biases toward `neutral` for low levels, opens up `playful`/`regional` once `level ≥ 40`, and only picks `formal`/`literary` at `level ≥ 60`. Returned with a tiny tooltip ("rajar = informal: to chat") on hover so the learning is explicit when desired.
 
-### 3.8 Post-chat interest extraction
+### 3.8 Post-chat interest extraction & curation (LLM-as-curator)
 
-When a conversation ends (`Done` button or navigating away), fire `POST /api/conversations/:id/extract`. This:
-1. Reads the message log.
-2. Calls `gpt-4o-mini` with a prompt: *"What concrete topics did this user actively engage with? Return 1–4 short noun phrases suitable as future conversation tiles."*
-3. Upserts those into `user_interests` (deduplicates on insert) and regenerates `users.interests_text`.
+When a conversation ends (`Done` button), fire `POST /api/conversations/:id/extract`. This is one combined `gpt-4o-mini` call (~$0.0005) that does **both** extraction and curation:
 
-This is the **only** way the AI's understanding of the user grows. Future tile generation reads `user_interests` — never the raw chat log. Keeps tile generation cheap and the user's interest profile auditable.
+**Input to the prompt:**
+- `users.interests_text` (current narrative, ≤150 words)
+- All current `user_interests` rows (interest + is_recent flag)
+- The conversation's message log
+
+**Asked to return JSON:**
+- An updated narrative (≤150 words, captures who the user is right now)
+- An updated tag list (≤12 entries, ranked by importance)
+- Mark 3–5 as "currently active" → become `is_recent=1`
+
+**Server then writes wholesale:**
+- `UPDATE users SET interests_text = ?`
+- `DELETE FROM user_interests WHERE user_id = ?` then bulk insert the new list
+- Set `conversations.ended_at = now`
+
+The 12-tag cap means the array can't grow unbounded — when the user pivots from football to chess, the LLM naturally drops football tags as extractions stop mentioning them.
+
+This is the **only** way the AI's understanding of the user grows. Future tile generation reads `interests_text` + `user_interests` — never the raw chat log. Keeps tile generation cheap (no per-call retrieval) and the user's interest profile inspectable.
 
 ---
 
@@ -201,7 +218,11 @@ Each phase ends in a working app. Sub-bullets are tasks; **Files** lists what ge
 *Goal: tiles come from an LLM call shaped by the user's interests, with no overlap across the 4 sets shown in a single home-screen visit.*
 
 - Create `POST /api/topics` taking `{ exclude: string[] }` (already-shown topics in this visit) and reading the user from session. Returns 9 topic strings: 5 directly matching the user's interests, 3 adjacent/related, 1 random. Order randomised server-side.
-- LLM: `gpt-4o-mini`, `response_format: json_object`. Prompt explains the 5-3-1 split, accepts vague-or-specific phrasing ("Champions League", "Johan Cruijff's philosophy", "Formula 1 in 2026"), and is told to **avoid** any topic from the exclusion list (and avoid near-duplicates of them). Topic phrasing is in the user's native language (so the home screen reads naturally pre-chat).
+- LLM: `gpt-4o-mini`, `response_format: json_object`. Prompt receives:
+  - `interests_text` (the narrative)
+  - The 12 tags from `user_interests`, with the 3–5 marked `is_recent=1` listed first / flagged
+  - The exclusion list (already-shown topics)
+- Prompt explains the 5-3-1 split, tells the LLM to lean on `is_recent` tags first when picking the 5 matches, accepts vague-or-specific phrasing ("Champions League", "Johan Cruijff's philosophy", "Formula 1 in 2026"), and avoids near-duplicates of the exclusion list. Topic phrasing is in the user's native language.
 - Returns `{ topics: [{ text, kind: "match"|"related"|"random" }] }`.
 - Wire `home` to fetch `/api/topics` on mount with `exclude: []` and render the result.
 

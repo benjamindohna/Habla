@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS user_interests (
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   interest   TEXT NOT NULL,
   added_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  is_recent  INTEGER NOT NULL DEFAULT 0, -- 1 = currently active interest (last few chats); 0 = background
   PRIMARY KEY (user_id, interest)
 );
 

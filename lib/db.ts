@@ -20,6 +20,7 @@ function ensureColumn(db: DbHandle, table: string, column: string, defSql: strin
 function migrate(db: DbHandle): void {
   // SQLite has no ADD COLUMN IF NOT EXISTS — apply additive migrations explicitly.
   ensureColumn(db, "conversations", "ended_at", "INTEGER");
+  ensureColumn(db, "user_interests", "is_recent", "INTEGER NOT NULL DEFAULT 0");
 }
 
 function initDb(): DbHandle {
