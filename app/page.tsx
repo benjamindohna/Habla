@@ -4,20 +4,22 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AudioRecorder from "@/components/AudioRecorder";
 import CorrectionBlock from "@/components/CorrectionBlock";
-import TopicGrid from "@/components/TopicGrid";
+import TopicGrid, { type Topic } from "@/components/TopicGrid";
 import type { CorrectionResult } from "@/types/correction";
 
-// Placeholder tiles for Phase 2. Phase 3 replaces these with LLM-generated topics.
-const PLACEHOLDER_TOPICS = [
-  "Football",
-  "Cars",
-  "Psychology",
-  "Space",
-  "Sci-fi novels",
-  "Technology",
-  "Music",
-  "Travel",
-  "Cooking",
+// Placeholder tiles for Phase 2. Phase 3 replaces these with LLM-generated
+// topics tailored to the user's interests, with native translations from the
+// same call.
+const PLACEHOLDER_TOPICS: Topic[] = [
+  { es: "Fútbol", native: "Fußball" },
+  { es: "Coches", native: "Autos" },
+  { es: "Psicología", native: "Psychologie" },
+  { es: "El espacio", native: "Der Weltraum" },
+  { es: "Novelas de ciencia ficción", native: "Science-Fiction-Romane" },
+  { es: "Tecnología", native: "Technologie" },
+  { es: "Música", native: "Musik" },
+  { es: "Viajes", native: "Reisen" },
+  { es: "Cocina", native: "Kochen" },
 ];
 
 interface Me {
@@ -118,10 +120,10 @@ export default function Page() {
     router.push("/login");
   }
 
-  function enterChat(topic: string) {
+  function enterChat(topic: Topic) {
     setStatus({ stage: "idle" });
     setEditingInterpretation(false);
-    setMode({ kind: "chat", topic });
+    setMode({ kind: "chat", topic: topic.es });
   }
 
   function backToHome() {
@@ -185,7 +187,6 @@ export default function Page() {
 
   // ── Home mode ───────────────────────────────────────────────────────────
   if (mode.kind === "home") {
-    const interestsLine = me.interestsText.trim() || me.interests.join(", ");
     return (
       <main className="flex min-h-screen flex-col items-center px-4 py-8">
         <div className="w-full max-w-xl flex items-center justify-end mb-12">
@@ -198,16 +199,9 @@ export default function Page() {
         </div>
 
         <div className="w-full max-w-xl flex flex-col items-center gap-8 flex-1">
-          <div className="text-center space-y-2">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Hola, ¿de qué quieres hablar hoy?
-            </h1>
-            {interestsLine && (
-              <p className="text-xs text-neutral-400 italic">
-                Tus intereses: {interestsLine}
-              </p>
-            )}
-          </div>
+          <h1 className="text-2xl font-semibold tracking-tight text-center">
+            Hola, ¿de qué quieres hablar hoy?
+          </h1>
 
           <TopicGrid topics={PLACEHOLDER_TOPICS} onSelect={enterChat} />
 
