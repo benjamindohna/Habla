@@ -25,12 +25,11 @@ export default function TopicGrid({ topics, onSelect, disabled = false }: TopicG
           {topic ? (
             <>
               <span className="text-sm text-neutral-800 leading-snug">{topic.es}</span>
-              {/* grid-rows trick: smoothly animates from 0 to auto height; the
-                  inner span uses overflow-hidden so the German fades up into
-                  view rather than popping. The whole pair stays vertically
-                  centered because the parent flex re-centers as height grows. */}
-              <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] group-focus-visible:grid-rows-[1fr] transition-[grid-template-rows] duration-200 ease-out">
-                <span className="overflow-hidden text-xs text-neutral-400 leading-tight pt-1">
+              {/* Wrapper snaps from h-0 to h-auto on hover (no slide reveal);
+                  the inner span fades in with an opacity transition. Result:
+                  Spanish re-centers instantly, German just blends in. */}
+              <div className="h-0 group-hover:h-auto group-focus-visible:h-auto overflow-hidden">
+                <span className="block pt-1 text-xs text-neutral-400 leading-tight opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-200 ease-out">
                   {topic.native}
                 </span>
               </div>
