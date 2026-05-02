@@ -7,20 +7,9 @@ import CorrectionBlock from "@/components/CorrectionBlock";
 import TopicGrid, { type Topic } from "@/components/TopicGrid";
 import type { CorrectionResult } from "@/types/correction";
 
-// Placeholder tiles for Phase 2. Phase 3 replaces these with LLM-generated
-// topics tailored to the user's interests, with native translations from the
-// same call.
-const PLACEHOLDER_TOPICS: Topic[] = [
-  { es: "Fútbol", native: "Fußball" },
-  { es: "Coches", native: "Autos" },
-  { es: "Psicología", native: "Psychologie" },
-  { es: "El espacio", native: "Der Weltraum" },
-  { es: "Novelas de ciencia ficción", native: "Science-Fiction-Romane" },
-  { es: "Tecnología", native: "Technologie" },
-  { es: "Música", native: "Musik" },
-  { es: "Viajes", native: "Reisen" },
-  { es: "Cocina", native: "Kochen" },
-];
+interface TopicWithKind extends Topic {
+  kind: "match" | "related" | "random";
+}
 
 interface Me {
   id: number;
@@ -100,6 +89,10 @@ export default function Page() {
   const [editingInterpretation, setEditingInterpretation] = useState(false);
   const [interpretationDraft, setInterpretationDraft] = useState("");
 
+  // Topics for the home grid. null = loading; [] = error fetching first set.
+  const [topics, setTopics] = useState<TopicWithKind[] | null>(null);
+  const [topicsError, setTopicsError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     fetch("/api/me")
@@ -114,6 +107,30 @@ export default function Page() {
       cancelled = true;
     };
   }, [router]);
+
+  // Fetch the first set of topics once the user is loaded.
+  useEffect(() => {
+    if (!me || topics !== null) return;
+    let cancelled = false;
+    fetch("/api/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exclude: [] }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load topics"))))
+      .then((data: { topics: TopicWithKind[] }) => {
+        if (!cancelled) setTopics(data.topics);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) {
+          setTopics([]);
+          setTopicsError(err.message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [me, topics]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -187,6 +204,7 @@ export default function Page() {
 
   // ── Home mode ───────────────────────────────────────────────────────────
   if (mode.kind === "home") {
+    const showLoading = topics === null;
     return (
       <main className="flex min-h-screen flex-col items-center px-4 py-8">
         <div className="w-full max-w-xl flex items-center justify-end mb-12">
@@ -203,7 +221,11 @@ export default function Page() {
             Hola, ¿de qué quieres hablar hoy?
           </h1>
 
-          <TopicGrid topics={PLACEHOLDER_TOPICS} onSelect={enterChat} />
+          <TopicGrid topics={topics ?? []} onSelect={enterChat} disabled={showLoading} />
+
+          {topicsError && (
+            <p className="text-xs text-red-500">{topicsError}</p>
+          )}
 
           <button
             onClick={() => { /* Phase 4 will wire re-roll */ }}
@@ -211,7 +233,7 @@ export default function Page() {
             className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Re-roll comes in Phase 4"
           >
-            Re-roll topics
+            {showLoading ? "Loading topics…" : "Re-roll topics"}
           </button>
         </div>
       </main>
