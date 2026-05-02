@@ -10,6 +10,18 @@ function dbPath(): string {
   return process.env.DATABASE_PATH ?? join(process.cwd(), "data", "habla.db");
 }
 
+function ensureColumn(db: DbHandle, table: string, column: string, defSql: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${defSql}`);
+  }
+}
+
+function migrate(db: DbHandle): void {
+  // SQLite has no ADD COLUMN IF NOT EXISTS — apply additive migrations explicitly.
+  ensureColumn(db, "conversations", "ended_at", "INTEGER");
+}
+
 function initDb(): DbHandle {
   const path = dbPath();
   mkdirSync(dirname(path), { recursive: true });
@@ -20,6 +32,7 @@ function initDb(): DbHandle {
 
   const schema = readFileSync(join(process.cwd(), "lib", "schema.sql"), "utf-8");
   db.exec(schema);
+  migrate(db);
 
   return db;
 }

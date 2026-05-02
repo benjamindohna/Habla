@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   topic      TEXT NOT NULL,
-  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  ended_at   INTEGER -- set when the user presses Done; NULL while conversation is active
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -42,3 +43,6 @@ CREATE TABLE IF NOT EXISTS messages (
   segments_json   TEXT,
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages(conversation_id, id);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id, id);
