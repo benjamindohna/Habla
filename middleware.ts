@@ -20,10 +20,11 @@ export async function middleware(request: NextRequest) {
 
   try {
     const secret = new TextEncoder().encode(process.env.AUTH_SECRET!);
-    await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, secret);
+    if (typeof payload.userId !== "number") throw new Error("legacy token");
     return NextResponse.next();
   } catch {
-    // Token invalid or expired
+    // Token invalid, expired, or in legacy shape — force re-login.
     const response = NextResponse.redirect(new URL("/login", request.url));
     response.cookies.delete("auth-token");
     return response;

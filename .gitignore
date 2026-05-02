@@ -11,3 +11,9 @@ out/
 
 # system files
 .DS_Store
+
+# local SQLite database
+data/
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo
