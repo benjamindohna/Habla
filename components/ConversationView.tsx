@@ -47,11 +47,15 @@ async function interpretTranscript(
   return res.json();
 }
 
-async function localizeInterpretation(intendedMeaning: string): Promise<string> {
+async function localizeInterpretation(
+  intendedMeaning: string,
+  transcript: string,
+  nativeLanguage: string,
+): Promise<string> {
   const res = await fetch("/api/localize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ intendedMeaning }),
+    body: JSON.stringify({ intendedMeaning, transcript, nativeLanguage }),
   });
   if (!res.ok) throw new Error("Localization failed");
   const { local_version_es } = await res.json();
@@ -108,7 +112,11 @@ export default function ConversationView({
       : await interpretTranscript(transcript, nativeLanguage);
 
     setPending({ stage: "processing", step: "Translating to Spanish…", transcript });
-    const local_version_es = await localizeInterpretation(interpretation.intended_meaning_native);
+    const local_version_es = await localizeInterpretation(
+      interpretation.intended_meaning_native,
+      transcript,
+      nativeLanguage,
+    );
 
     setPending({ stage: "processing", step: "Comparing versions…", transcript });
     const pairs = await segmentSentences(transcript, local_version_es, nativeLanguage);

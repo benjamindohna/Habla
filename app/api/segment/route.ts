@@ -47,7 +47,7 @@ Alignment rules:
     - second: the corresponding learner segment
 16. If something was already exactly correct and truly aligned, it may appear as a neutral matched pair.
 17. If something is missing in the learner version, use an empty string for user_segment.
-18. If the learner said something extra that does not belong in the local version, attach it to the most relevant pair.
+18. If the learner said something extra that does not belong in the local version, create a dedicated pair with empty local_segment for that extra fragment. Do NOT attach extras to a neighbouring pair.
 19. Prefer pedagogical usefulness over mechanical diffing.
 20. Commas and inline punctuation (,  ;  :) must NEVER appear as standalone segments. Always attach them to the segment that immediately precedes them. A segment whose entire content is punctuation is always wrong.
 21. When deciding is_match, ignore trailing punctuation entirely. If two segments are identical except that one has a trailing comma and the other does not, they are a match. Punctuation differences alone must never cause a mismatch.
@@ -62,7 +62,14 @@ Rules for is_match:
 - Prefer marking independently correct words or short stretches as is_match true whenever possible.
 - Do not mark a tiny subpart as is_match true if doing so would break apart a clearly unified phrase.
 
-Very important:
+Very important — coverage invariants (these are absolute):
+- The concatenation of all local_segment fields, in pair order, joined with single spaces, must reconstruct LOCAL exactly (modulo whitespace and the punctuation rules above).
+- The concatenation of all user_segment fields, in pair order, joined with single spaces, must reconstruct LEARNER exactly (modulo whitespace).
+- Every word from LEARNER appears in exactly ONE user_segment. No word may be duplicated, dropped, or reassigned.
+- Every word from LOCAL appears in exactly ONE local_segment. Same rule.
+- If you cannot satisfy these invariants with a multi-pair alignment, prefer a single mismatch pair containing all of LOCAL and all of LEARNER over an alignment that drops or duplicates any word.
+
+Other formatting:
 - Each segment's local_segment and user_segment must NOT begin with a space and must NOT end with a space.
 - The final segment in the pairs list must end with the sentence's closing punctuation.
 - Always write numbers as words, never as digits.
@@ -122,6 +129,42 @@ function normalizePairs(pairs: Pair[]): Pair[] {
   });
 }
 
+/**
+ * Logs a warning when the pairs don't cover the original LEARNER / LOCAL
+ * texts. Compares whitespace-collapsed, punctuation-stripped, lower-cased
+ * forms — strict enough to catch dropped/duplicated words, loose enough to
+ * ignore the punctuation/casing that the LLM is allowed to normalise.
+ *
+ * Doesn't fail the request — it's a metric to see how often the coverage
+ * invariant breaks in practice. If the rate is non-trivial we add a retry.
+ */
+function warnIfCoverageBroken(pairs: Pair[], transcript: string, localVersionEs: string) {
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[.,;:!?¿¡"'()]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const joinedUser = norm(pairs.map((p) => p.user_segment).join(" "));
+  const joinedLocal = norm(pairs.map((p) => p.local_segment).join(" "));
+  const expectedUser = norm(transcript);
+  const expectedLocal = norm(localVersionEs);
+
+  if (joinedUser !== expectedUser) {
+    console.warn(
+      "[/api/segment] coverage break (user):",
+      JSON.stringify({ expected: expectedUser, got: joinedUser }),
+    );
+  }
+  if (joinedLocal !== expectedLocal) {
+    console.warn(
+      "[/api/segment] coverage break (local):",
+      JSON.stringify({ expected: expectedLocal, got: joinedLocal }),
+    );
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { transcript, localVersionEs, nativeLanguage = "German" } = (await req.json()) as {
@@ -145,7 +188,9 @@ export async function POST(req: NextRequest) {
 
     const raw = completion.choices[0].message.content ?? "{}";
     const { pairs } = JSON.parse(raw) as { pairs: Pair[] };
-    return NextResponse.json({ pairs: normalizePairs(pairs) });
+    const normalized = normalizePairs(pairs);
+    warnIfCoverageBroken(normalized, transcript, localVersionEs);
+    return NextResponse.json({ pairs: normalized });
   } catch (err) {
     console.error("[/api/segment]", err);
     return NextResponse.json({ error: "Segmentation failed" }, { status: 500 });
