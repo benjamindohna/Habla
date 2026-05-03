@@ -155,6 +155,13 @@ export default function Page() {
     setStatus({ stage: "idle" });
     setEditingInterpretation(false);
     setMode({ kind: "chat", topic: topic.es });
+    // Fire-and-forget: record the tap so future topic generations drift toward
+    // what the user actually engages with. Failure is non-blocking.
+    fetch("/api/me/interests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ interest: topic.es }),
+    }).catch(() => {});
   }
 
   function backToHome() {
