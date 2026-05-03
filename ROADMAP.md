@@ -12,6 +12,8 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
 
 - **Conversation practice** — currently the only mode. Opens what is today `app/page.tsx`'s home (greeting + topic grid).
 - **Vocabulary repetition / vocabulary test** — flashcard-style review of the user's `user_unknown_words` list, surfaced by frequency rank (most fundamental words first). Schema already supports this — just no UI yet.
+  - **Storage form rule:** words must be stored in the **exact form the user encountered**, not normalised to the infinitive or lemma. If the user looks up `comió` (third-person singular preterite of *comer*), store `comió` — not `comer`. Same for past participles (`hecho`, not `hacer`), gerunds (`viviendo`), conjugated forms, plurals, gendered adjectives, etc. Rationale: the form *is* the lesson — the learner needs to recognise and produce it as-seen, and lemma collapsing erases the exact stumbling block they hit. Frequency rank lookup can still happen against the lemma internally for sorting, but the stored row preserves the surface form.
+  - Implication for Phase 8 (when populating the table): no lemmatization on insert. Trim, lowercase, store.
 
 The dashboard becomes the new `/` route; current home becomes something like `/conversation`.
 
