@@ -35,6 +35,25 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
       audioRef.current.pause();
       audioRef.current = null;
     }
+
+    // Preload normal-speed TTS so the first click plays instantly.
+    // Slow speed is generated on demand (rare second-click).
+    let cancelled = false;
+    fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: result.local_version_es, speed: 1.0 }),
+    })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (!cancelled && blob) blobCacheRef.current.normal = blob;
+      })
+      .catch(() => {
+        // Silent — handleSpeak will fall back to a fresh fetch on click.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [result]);
 
   async function handlePairClick(pair: Pair, index: number) {

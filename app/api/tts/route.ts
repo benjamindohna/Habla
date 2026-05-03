@@ -17,6 +17,14 @@ export async function POST(req: NextRequest) {
       voice: "marin" as any,
       input: text,
       speed: speed ?? 1.0,
+      // Explicit coverage instruction — gpt-4o-mini-tts occasionally drops
+      // trailing clauses on multi-sentence input. Telling it to read the full
+      // text appears to reduce that.
+      instructions:
+        "Read the entire Spanish text from start to finish, exactly as written. " +
+        "Speak in a natural, friendly conversational tone — like a Spanish native speaker. " +
+        "Include every clause, every sentence, every punctuation pause. " +
+        "Do not summarise, abbreviate, or truncate any part of the text.",
     });
 
     const buffer = Buffer.from(await speech.arrayBuffer());
