@@ -41,10 +41,10 @@ ${tagLines}
 ALREADY SHOWN PREVIOUSLY (must not repeat or near-duplicate)
 ${excludeLines}
 
-Produce exactly 9 topics in this 5–3–1 split:
-- 5 "match": directly tied to one of the interest tags. Prefer tags marked [recent] when present.
-- 3 "related": a clear stretch from the interests — adjacent but plausible.
-- 1 "random": a genuine curveball, unrelated to the tags.
+Produce exactly 9 topics in this 4–3–2 split:
+- 4 "match": directly tied to one of the interest tags. Prefer tags marked [recent] when present.
+- 3 "related": a real stretch — loosely or tangentially connected, allowed to be quite far from the interests. Still keep some thread back to one of them, but reach for adjacencies that broaden horizons rather than reinforce them.
+- 2 "random": genuine curveballs, completely unrelated to the tags. Interesting, thought-provoking topics anyone might want to talk about.
 
 Topic phrasing rules:
 - Each topic is a short conversation prompt: 2–8 words.

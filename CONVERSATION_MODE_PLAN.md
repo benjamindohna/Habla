@@ -8,7 +8,7 @@ This document describes the full set of changes to add: per-user accounts in a r
 
 ## 1. Goal
 
-After login, the user lands on a Spanish greeting and a 3×3 grid of interest tiles. Tiles are LLM-generated from the user's stored interests (5 matching, 3 adjacent, 1 random), pre-rolled in pairs so re-rolling is instant. Tapping a tile opens a chat: the AI opens in level-adjusted Spanish, the user records replies, and each turn re-uses the existing correction stack (interpret → localize → segment → explain) inline. Tap-to-translate works on the AI's Spanish too. Words the user looks up are stored on the user record, sorted by Spanish frequency.
+After login, the user lands on a Spanish greeting and a 3×3 grid of interest tiles. Tiles are LLM-generated from the user's stored interests (4 matching, 3 a real stretch, 2 random), pre-rolled in pairs so re-rolling is instant. Tapping a tile opens a chat: the AI opens in level-adjusted Spanish, the user records replies, and each turn re-uses the existing correction stack (interpret → localize → segment → explain) inline. Tap-to-translate works on the AI's Spanish too. Words the user looks up are stored on the user record, sorted by Spanish frequency.
 
 ---
 
@@ -214,7 +214,7 @@ Each phase ends in a working app. Sub-bullets are tasks; **Files** lists what ge
 
 ---
 
-### Phase 3 — Topic generation (LLM, 5-3-1 split)
+### Phase 3 — Topic generation (LLM, 4-3-2 split)
 *Goal: a function that produces one set of 9 topics for a user, given an exclusion list.*
 
 - `lib/generateTopics.ts`: `generateTopicsForUser(userId, exclude[])` returns 9 topics `{ es, native, kind: "match"|"related"|"random" }`. Single `gpt-4o-mini` call with `response_format: json_object`.
@@ -222,7 +222,7 @@ Each phase ends in a working app. Sub-bullets are tasks; **Files** lists what ge
   - `interests_text` (the narrative)
   - The 12 tags from `user_interests`, with `is_recent=1` flagged
   - The exclusion list of already-shown topics
-- Prompt explains the 5-3-1 split, tells the LLM to lean on `is_recent` tags first when picking the 5 matches, accepts vague-or-specific phrasing, and avoids near-duplicates of the exclusion list.
+- Prompt explains the 4-3-2 split, tells the LLM to lean on `is_recent` tags first when picking the 4 matches, accepts vague-or-specific phrasing, and avoids near-duplicates of the exclusion list.
 - Order randomised server-side.
 
 **Files:** `lib/generateTopics.ts` (new).
@@ -356,7 +356,7 @@ The order below is chosen so that every phase has a working app at its end, no p
 ```
 Phase 1 (DB + users)
   ├──► Phase 2 (home shell, static tiles)
-  │      ├──► Phase 3 (LLM tiles, 5-3-1)
+  │      ├──► Phase 3 (LLM tiles, 4-3-2)
   │      │      └──► Phase 4 (preload + 4-set budget)
   │      ├──► Phase 5 (interest tracking on tile-tap)
   │      └──► Phase 6 (chat shell)
@@ -371,7 +371,7 @@ Phase 9 (polish) follows everything.
 
 1. **Phase 1** — DB + user model swap-in
 2. **Phase 2** — home-screen shell with static tiles
-3. **Phase 3** — LLM tile generation (5-3-1)
+3. **Phase 3** — LLM tile generation (4-3-2)
 4. **Phase 4** — preloading + 4-set budget
 5. **Phase 5** — interest tracking on tile-tap
 6. **Phase 6** — chat shell (UI only)
@@ -383,7 +383,7 @@ Phase 9 (polish) follows everything.
 
 - **1 must come first.** Every later phase reads or writes per-user data. Building features against the old `USERS` array and migrating later means redoing the same work twice.
 - **2 before 3.** A static-tile home screen lets us validate layout, routing, and `/api/me` without LLM cost or async edge cases. Once that's solid, 3 swaps in real tiles by changing one fetch — low risk.
-- **3 before 4.** Preloading is pure client-state on top of a working endpoint. Building 4 against a placeholder API means rebuilding the queue logic when the real shape (exclusion list, 5-3-1 kinds) lands.
+- **3 before 4.** Preloading is pure client-state on top of a working endpoint. Building 4 against a placeholder API means rebuilding the queue logic when the real shape (exclusion list, 4-3-2 kinds) lands.
 - **4 before 5.** Either order works, but 4 is a pure UX win that's testable in isolation, while 5 only manifests as drift in *future* tile generations (slow to verify). Shipping 4 first gives an instantly noticeable improvement and frees Phase 5 to focus on the write-path correctness.
 - **5 before 6.** Strictly optional — they're independent — but doing 5 first means by the time the chat shell exists, the home screen is feature-complete, and Phase 6 can ship without distraction. Also: tapping a tile in Phase 6 needs to write to `user_interests` for the round-trip to feel real, and Phase 5 already provides that.
 - **6 before 7.** Phase 6 builds the UI shell with a hardcoded AI opener and routes user turns through the existing correction pipeline. This proves the layout and bubble structure work before we wire the live conversation API. Building 7 first would mean shipping endpoints with nothing to call them.
