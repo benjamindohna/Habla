@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 type Style = "natural" | "transcript_aware";
 
 function naturalPrompt(nativeLanguage: string): string {
-  return `You are a native Spanish speaker. Your job is to express the given meaning in natural, everyday Spanish as an average local Spaniard would say it in casual conversation.
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+  const targetName = DEFAULT_TARGET.language;
+  return `You are a native ${targetName} speaker. Your job is to express the given meaning in natural, ${target} as it would be spoken in casual conversation.
 
 Rules:
-- Not textbook Spanish. Not overly formal. Natural, local, everyday speech.
+- Match the variety: ${target}. Vocabulary, idioms, named entities, and register must fit this variety. Do not drift to other regions or registers.
 - Preserve EVERY clause from the meaning, even short tags or seemingly redundant phrases. Use multiple sentences if needed.
-- The output is in Spanish. The input meaning is in ${nativeLanguage}.
+- The output is in ${targetName}. The input meaning is in ${nativeLanguage}.
 - Always write numbers as words, never as digits.
 - End with appropriate punctuation.
 
@@ -20,21 +23,23 @@ Return ONLY valid JSON:
 }
 
 function transcriptAwarePrompt(nativeLanguage: string): string {
-  return `You are a Spanish-language correction engine for a learner.
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+  const targetName = DEFAULT_TARGET.language;
+  return `You are a ${targetName}-language correction engine for a learner.
 
 You receive two inputs:
-- TRANSCRIPT: what the learner actually said. May mix Spanish and ${nativeLanguage}, may have grammar errors or unnatural phrasing.
+- TRANSCRIPT: what the learner actually said. May mix ${targetName} and ${nativeLanguage}, may have grammar errors or unnatural phrasing.
 - INTENT: what they meant to say, expressed in ${nativeLanguage}.
 
-Your job: produce one natural everyday Spanish sentence (or sentences, if the learner spoke in multiple clauses) that captures the INTENT and that the learner can use as a corrected reference.
+Your job: produce one ${target} sentence (or sentences, if the learner spoke in multiple clauses) that captures the INTENT and that the learner can use as a corrected reference.
 
 CRITICAL: Stay as close to the TRANSCRIPT as possible.
-- Where the TRANSCRIPT is already correct, natural Spanish, KEEP THE LEARNER'S EXACT WORDS. Do not rewrite correct Spanish into synonyms or rearrange word order for stylistic reasons.
-- Only change parts that are wrong, unnatural, or in ${nativeLanguage}.
-- The goal is a corrected version, not a rewritten version. If the learner's phrasing is acceptable, leave it alone.
+- Where the TRANSCRIPT is already correct, natural ${target}, KEEP THE LEARNER'S EXACT WORDS. Do not rewrite correct ${targetName} into synonyms or rearrange word order for stylistic reasons.
+- Only change parts that are wrong, unnatural, in ${nativeLanguage}, or in the wrong ${targetName} variety.
+- The goal is a corrected version, not a rewritten version. If the learner's phrasing is acceptable for ${target}, leave it alone.
 
 Other rules:
-- Natural local Spanish. Not textbook, not overly formal.
+- Match the variety: ${target}. Replace vocabulary or idioms from other regions/registers with their ${target} equivalents.
 - Preserve EVERY clause from INTENT. If the learner said multiple clauses (even seemingly redundant ones, like a softener at the end), include all of them.
 - Always write numbers as words, never as digits.
 - End with appropriate punctuation.

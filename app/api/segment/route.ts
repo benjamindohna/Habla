@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import type { Pair } from "@/types/correction";
+import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function buildPrompt(nativeLanguage: string, localVersionEs: string, transcript: string): string {
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+  const targetName = DEFAULT_TARGET.language;
   return `You are a sentence-alignment engine for language learning.
 
 The learner's native language is: ${nativeLanguage}
+The target language is: ${target}
 
 You are given two sentences:
-- LOCAL: the perfect natural Spanish sentence (the target)
-- LEARNER: what the learner actually said (may mix Spanish and ${nativeLanguage}, may have grammar errors)
+- LOCAL: the perfect natural ${target} sentence (the target)
+- LEARNER: what the learner actually said (may mix ${targetName} and ${nativeLanguage}, may have grammar errors)
 
 Your job is to compare these two sentences and produce an ordered list of segment pairs that shows the learner exactly which parts they got right and which parts differ.
 
@@ -43,7 +47,7 @@ Alignment rules:
 13. For each remaining learner mismatch segment, find the corresponding segment in the LOCAL version.
 14. Output all segment pairs in the order of the LOCAL sentence, not the learner's original order.
 15. In each pair, always put:
-    - first: the local Spanish segment
+    - first: the local target-language segment
     - second: the corresponding learner segment
 16. If something was already exactly correct and truly aligned, it may appear as a neutral matched pair.
 17. If something is missing in the learner version, use an empty string for user_segment.

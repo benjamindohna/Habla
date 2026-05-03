@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -21,10 +22,10 @@ export async function POST(req: NextRequest) {
       // trailing clauses on multi-sentence input. Telling it to read the full
       // text appears to reduce that.
       instructions:
-        "Read the entire Spanish text from start to finish, exactly as written. " +
-        "Speak in a natural, friendly conversational tone — like a Spanish native speaker. " +
-        "Include every clause, every sentence, every punctuation pause. " +
-        "Do not summarise, abbreviate, or truncate any part of the text.",
+        `Read the entire ${DEFAULT_TARGET.language} text from start to finish, exactly as written. ` +
+        `Speak in a natural, friendly conversational tone — like a ${describeTargetLanguage(DEFAULT_TARGET)} native speaker. ` +
+        `Include every clause, every sentence, every punctuation pause. ` +
+        `Do not summarise, abbreviate, or truncate any part of the text.`,
     });
 
     const buffer = Buffer.from(await speech.arrayBuffer());

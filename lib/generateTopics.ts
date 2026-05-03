@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { getDb } from "./db";
 import { getUserById } from "./users";
+import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
 
 export interface Topic {
   es: string;
@@ -22,6 +23,8 @@ function buildPrompt(args: {
   exclude: string[];
 }): string {
   const { nativeLanguage, interestsText, interests, exclude } = args;
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+  const targetName = DEFAULT_TARGET.language;
 
   const tagLines = interests.length
     ? interests.map((r) => `  - ${r.interest}${r.is_recent ? " [recent]" : ""}`).join("\n")
@@ -31,7 +34,7 @@ function buildPrompt(args: {
     ? exclude.map((t) => `  - ${t}`).join("\n")
     : "  (none)";
 
-  return `You generate conversation-starter topics for a Spanish learner whose native language is ${nativeLanguage}.
+  return `You generate conversation-starter topics for a ${target} learner whose native language is ${nativeLanguage}.
 
 USER PROFILE
 Narrative: ${interestsText.trim() || "(none yet)"}
@@ -51,14 +54,15 @@ Topic phrasing rules:
 - Mix vague ("Champions League") and specific ("Johan Cruijff's playing philosophy"). Variety helps.
 - Avoid generic single-word nouns when a more inviting phrasing is possible.
 - Do not produce duplicates within this set, and do not near-duplicate any item in the exclusion list.
+- The "es" field must be phrased in ${target} — use vocabulary, named entities, and idioms appropriate to that variety.
 
 Return ONLY valid JSON in this shape:
 {
   "topics": [
-    { "es": "<Spanish phrasing>", "native": "<${nativeLanguage} phrasing>", "kind": "match" | "related" | "random" }
+    { "es": "<phrasing in ${target}>", "native": "<${nativeLanguage} phrasing>", "kind": "match" | "related" | "random" }
   ]
 }
-The "topics" array must have exactly 9 items.`;
+The "topics" array must have exactly 9 items. The field is named "es" for historical reasons but must contain ${targetName}.`;
 }
 
 function shuffle<T>(arr: T[]): T[] {

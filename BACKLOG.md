@@ -4,6 +4,22 @@ Things to do later — out of scope for the current phase but tracked so they do
 
 ---
 
+## Per-user target language spec
+
+**Trigger:** Phase 4-7 (target-language threading)
+**Status:** deferred until a settings UI exists or a user other than admin needs a different language
+
+`lib/targetLanguage.ts` currently exports a single `DEFAULT_TARGET` (`Spanish` / `castellano` / `everyday`) used by every prompt. When per-user differentiation is needed:
+
+1. Add columns to `users`: `target_language TEXT NOT NULL DEFAULT 'Spanish'`, `target_location TEXT` (nullable), `target_style TEXT NOT NULL DEFAULT 'everyday'`.
+2. Add `getUserTargetLanguageSpec(userId)` to `lib/users.ts` that returns the spec for a given user, falling back to `DEFAULT_TARGET` shape for missing fields.
+3. Each prompt that currently calls `describeTargetLanguage(DEFAULT_TARGET)` accepts the spec via the API (read from session) and passes it to the helper.
+4. Surface dropdowns in a settings UI for the three fields. Location options are language-dependent (Spanish: Castellano / Neutral / Latino; Hungarian: none).
+
+The prompts already read a spec — only the *source* of the spec needs to change.
+
+---
+
 ## Signup handler should warm topic sets for the new user
 
 **Trigger:** Phase 4 (topic-sets architecture)

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { toFile } from "openai";
+import { DEFAULT_TARGET } from "@/lib/targetLanguage";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -18,13 +19,14 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
     console.log("[/api/transcribe] blob size:", buffer.length, "type:", audioBlob.type, "nativeLanguage:", nativeLanguage);
 
-    // Prompt tells Whisper to expect mixed Spanish + native language so it
-    // doesn't force-map native-language words into Spanish phonetics.
+    // Prompt tells Whisper to expect mixed target + native language so it
+    // doesn't force-map native-language words into target-language phonetics.
     // temperature: 0 suppresses hallucinated filler phrases.
+    const targetName = DEFAULT_TARGET.language;
     const transcription = await openai.audio.transcriptions.create({
       file: await toFile(buffer, "audio.webm", { type: audioBlob.type || "audio/webm" }),
       model: "gpt-4o-transcribe",
-      prompt: `The speaker is learning Spanish and may mix in ${nativeLanguage} words they don't know in Spanish yet. Transcribe exactly what is said, preserving both Spanish and ${nativeLanguage} words as spoken. Always write numbers as words, never as digits.`,
+      prompt: `The speaker is learning ${targetName} and may mix in ${nativeLanguage} words they don't know in ${targetName} yet. Transcribe exactly what is said, preserving both ${targetName} and ${nativeLanguage} words as spoken. Always write numbers as words, never as digits.`,
     });
 
     console.log("[/api/transcribe] transcript:", JSON.stringify(transcription.text));

@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
-
-// Future: per-user setting. For now the app is Spanish-only.
-const TARGET_LANGUAGE = "Spanish";
+import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -20,20 +18,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "topic required" }, { status: 400 });
   }
 
-  const prompt = `You are opening a conversation in ${TARGET_LANGUAGE} with a learner.
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+
+  const prompt = `You are opening a conversation in ${target} with a learner.
 
 Topic: "${topic.trim()}"
 Learner level: ${user.level}/100 (0 = absolute beginner, 100 = sophisticated native speaker).
 
-Write a single opening message in ${TARGET_LANGUAGE} that:
+Write a single opening message in ${target} that:
 - Is genuinely interesting and inviting — not a generic "Do you like X?".
 - Asks a thoughtful, specific question about the topic that invites a real opinion, story, or take.
 - Matches the learner's level (aim a few notches above to stretch them, but stay understandable).
 - Is short and conversational — one or two sentences. Not a lecture.
 - Sounds like a real person starting a chat, not an interview.
+- Uses vocabulary, idioms, and references appropriate for ${target}. Avoid wording from other regions or registers.
 
 Return ONLY valid JSON:
-{ "text": "<the opening message in ${TARGET_LANGUAGE}>" }`;
+{ "text": "<the opening message in ${target}>" }`;
 
   try {
     const completion = await openai.chat.completions.create({

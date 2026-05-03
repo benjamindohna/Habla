@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { DEFAULT_TARGET } from "@/lib/targetLanguage";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -14,15 +15,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No transcript provided" }, { status: 400 });
     }
 
+    const targetName = DEFAULT_TARGET.language;
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
-          content: `You are a bilingual interpretation assistant. A language learner is trying to speak Spanish but may mix in their native language (${nativeLanguage}) and may have grammar mistakes or unnatural phrasing.
+          content: `You are a bilingual interpretation assistant. A language learner is trying to speak ${targetName} but may mix in their native language (${nativeLanguage}) and may have grammar mistakes or unnatural phrasing.
 
-Read the transcript and output what the person most likely intended to say, in ${nativeLanguage}. Do not produce Spanish output.
+Read the transcript and output what the person most likely intended to say, in ${nativeLanguage}. Do not produce ${targetName} output.
 
 CRITICAL — coverage:
 - Capture the COMPLETE intent. Every clause, every idea the learner attempted to express must appear in your output, in the order they said it.
