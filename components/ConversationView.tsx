@@ -17,7 +17,7 @@ interface ConversationViewProps {
 }
 
 type Message =
-  | { id: string; role: "ai"; text: string; muted?: boolean }
+  | { id: string; role: "ai"; text?: string; muted?: boolean; loading?: boolean }
   | { id: string; role: "user"; result: CorrectionResult; doneAt: number | null };
 
 type PendingStatus =
@@ -90,15 +90,48 @@ export default function ConversationView({
   onBack,
   onLogout,
 }: ConversationViewProps) {
+  const openerIdRef = useRef<string>(crypto.randomUUID());
   const [messages, setMessages] = useState<Message[]>(() => [
-    {
-      id: crypto.randomUUID(),
-      role: "ai",
-      text: `¡Hola! Vamos a hablar sobre ${topic}. ¿Por dónde quieres empezar?`,
-    },
+    { id: openerIdRef.current, role: "ai", loading: true },
   ]);
   const [pending, setPending] = useState<PendingStatus>({ stage: "idle" });
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Fetch the LLM-generated opener on mount.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/converse/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load opener"))))
+      .then((data: { text: string }) => {
+        if (cancelled) return;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === openerIdRef.current && m.role === "ai"
+              ? { ...m, text: data.text, loading: false }
+              : m,
+          ),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === openerIdRef.current && m.role === "ai"
+              ? { ...m, text: `(Couldn't load opener. Topic: ${topic})`, loading: false, muted: true }
+              : m,
+          ),
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Deliberately runs once on mount — opener is per-conversation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-scroll to the bottom on every message append or status change.
   useEffect(() => {
@@ -216,7 +249,7 @@ export default function ConversationView({
         <div className="w-full max-w-3xl mx-auto space-y-6">
           {messages.map((msg) =>
             msg.role === "ai" ? (
-              <AIBubble key={msg.id} text={msg.text} muted={msg.muted} />
+              <AIBubble key={msg.id} text={msg.text} muted={msg.muted} loading={msg.loading} />
             ) : (
               <UserBubble
                 key={msg.id}
