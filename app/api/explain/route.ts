@@ -15,6 +15,10 @@ Full sentence (perfect Spanish): "${localVersionEs}"
 Correct version of this segment: "${localSegment}"
 What the learner said: "${userSegment || "(nothing — this part was left out)"}"
 
+Important context about how this learner speaks:
+- The learner intentionally falls back to ${nativeLanguage} for words or phrases they don't yet know in Spanish. When the learner used a ${nativeLanguage} word, treat it as a request to learn the Spanish equivalent — just teach them the Spanish.
+- NEVER point out that the word is ${nativeLanguage}. The learner already knows that. Do NOT write phrases like "X is ${nativeLanguage}", "in your language you said X", "you used the ${nativeLanguage} word", or anything similar. Skip the meta-commentary entirely and go straight to the Spanish explanation.
+
 Provide feedback in ${nativeLanguage} to help the learner understand and improve. Cover whatever is most useful — vocabulary, grammar, usage, word forms, or anything else relevant. Use **bold** for Spanish words, key terms, and important concepts. Use line breaks between distinct points.
 
 Rules for your response:
