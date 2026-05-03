@@ -27,7 +27,12 @@ Resolved:
 Still open:
 
 1. **Deployment target.** SQLite (`better-sqlite3`) works on a local Node server (zero ops, file-based) but **not** on Vercel/serverless (ephemeral filesystem). If you'll deploy to Vercel, switch to **LibSQL/Turso** (SQLite-compatible, HTTP-backed, generous free tier). Plan below assumes local SQLite; the swap is one file (`lib/db.ts`) if needed.
-2. **"Done" vs "Continue" button.** I'm assuming `Continue` = process this turn & AI replies; `Done` = end the conversation and return to the topic grid. Confirm or correct.
+
+Resolved (Phase 6 chat semantics):
+
+- **No end-of-conversation button.** The back arrow at the top-left of the chat already returns to the topic grid; that's the conversation exit.
+- **`Done` is per-user-turn.** After the user records, the existing MVP correction UI renders inside the user's bubble (interpret → localize → segment → tap-to-explain). The user reviews / debugs at their own pace, then presses `Done` (positioned on or below that correction box) to signal "I'm finished reviewing — show me the AI's next message." The AI reply only fires on `Done`, never automatically.
+- **Post-chat extraction (Phase 7) triggers on back-arrow** — the natural "I'm done with this conversation" signal. If the user closes the tab without pressing back, the extraction is skipped (acceptable; the next chat-end will pick up the slack).
 
 ---
 
@@ -280,13 +285,14 @@ On re-roll: `current := next`, `next := NULL`, prune to 4 archives, return new c
 *Goal: chat-style layout works end-to-end with a static AI opener.*
 
 - New component `components/ConversationView.tsx`. Two-column-ish layout: AI bubbles left, user bubbles right.
-- `chat` mode now renders: header (topic name + back button + level), message list, recorder at bottom, `Done`/`Continue` buttons.
+- `chat` mode now renders: header (back arrow → topic grid + topic name), message list, recorder at bottom.
 - AI bubble component uses tappable Spanish segments → on tap, shows native translation in a popover (re-uses logic from `CorrectionBlock`).
-- User bubble component embeds the existing correction display (localized version, segment alignment, tap-to-explain) for that user's turn.
+- User bubble component embeds the existing MVP correction display (localized version, segment alignment, tap-to-explain) for that user's turn, plus a **`Done`** button on/below the correction box. Pressing `Done` is what advances the conversation — it triggers the next AI message. AI never replies automatically.
+- Until Phase 7 wires the real conversation API, `Done` can be a no-op or just hide the correction so the user can record again.
 
-**Files:** `components/ConversationView.tsx` (new), `components/AIBubble.tsx` (new), `components/UserBubble.tsx` (new — wraps existing `CorrectionBlock`), `app/page.tsx` (route to ConversationView when `mode==='chat'`).
+**Files:** `components/ConversationView.tsx` (new), `components/AIBubble.tsx` (new), `components/UserBubble.tsx` (new — wraps existing `CorrectionBlock` + adds Done button), `app/page.tsx` (route to ConversationView when `mode==='chat'`).
 
-**Done when:** the chat UI renders with a hardcoded AI opener and accepts a recorded user turn that flows through the existing correction pipeline inside a bubble.
+**Done when:** the chat UI renders with a hardcoded AI opener and accepts a recorded user turn that flows through the existing correction pipeline inside a user bubble. The `Done` button is present on the user bubble (no-op until Phase 7).
 
 ---
 
@@ -298,9 +304,10 @@ On re-roll: `current := next`, `next := NULL`, prune to 4 archives, return new c
 - The chat flow on each user turn:
   1. Record → transcribe (existing).
   2. interpret → localize → segment (existing) → render correction in user bubble.
-  3. POST `/api/converse/turn` with `local_version_es` → render new AI bubble.
+  3. User reviews the correction at their own pace. Presses **`Done`**.
+  4. POST `/api/converse/turn` with `local_version_es` → render new AI bubble.
 - Persist every AI and user message to the `messages` table after each turn.
-- `Done` button → soft-end the conversation, fire `POST /api/conversations/:id/extract` (see §3.8) to harvest topics into `user_interests`, then route back to home (which will now see updated interests).
+- **Conversation end (back-arrow click)** → fire `POST /api/conversations/:id/extract` (see §3.8) to harvest topics into `user_interests` and `invalidateNextSet()` so the next-set regenerates against fresh interests. Then navigate home. If the user closes the tab without pressing back, extraction is skipped — acceptable.
 - AI prompts include the level description from §3.6 and the target band (`level + 5..10`).
 
 **Files:** `app/api/converse/start/route.ts` (new), `app/api/converse/turn/route.ts` (new), `app/api/conversations/[id]/extract/route.ts` (new), `lib/conversations.ts` (new — DB helpers), `components/ConversationView.tsx` (wire turn handler + Done flow).
@@ -334,7 +341,8 @@ On re-roll: `current := next`, `next := NULL`, prune to 4 archives, return new c
 
 ## 5. Out of scope (explicitly deferred)
 
-> Items that fall out during the build live in [`BACKLOG.md`](./BACKLOG.md), with a reference back to the phase or change that triggered them. Add to it whenever something gets deferred mid-implementation.
+> - Smaller items that fall out during this build live in [`BACKLOG.md`](./BACKLOG.md), with a reference back to the phase that triggered them. Add to it whenever something gets deferred mid-implementation.
+> - The next *chapter* of the product (dashboard, vocabulary mode, conversation list redesign, in-chat re-roll) lives in [`ROADMAP.md`](./ROADMAP.md).
 
 
 - Sign-up flow (new accounts via UI). Add a user manually via `scripts/seed.ts` for now.
