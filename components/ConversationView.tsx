@@ -6,9 +6,12 @@ import AIBubble from "./AIBubble";
 import UserBubble from "./UserBubble";
 import type { CorrectionResult, Pair } from "@/types/correction";
 
+type CorrectionStyle = "natural" | "transcript_aware";
+
 interface ConversationViewProps {
   topic: string;
   nativeLanguage: string;
+  correctionStyle: CorrectionStyle;
   onBack: () => void;
   onLogout: () => void;
 }
@@ -51,11 +54,12 @@ async function localizeInterpretation(
   intendedMeaning: string,
   transcript: string,
   nativeLanguage: string,
+  style: CorrectionStyle,
 ): Promise<string> {
   const res = await fetch("/api/localize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ intendedMeaning, transcript, nativeLanguage }),
+    body: JSON.stringify({ intendedMeaning, transcript, nativeLanguage, style }),
   });
   if (!res.ok) throw new Error("Localization failed");
   const { local_version_es } = await res.json();
@@ -82,6 +86,7 @@ async function segmentSentences(
 export default function ConversationView({
   topic,
   nativeLanguage,
+  correctionStyle,
   onBack,
   onLogout,
 }: ConversationViewProps) {
@@ -116,6 +121,7 @@ export default function ConversationView({
       interpretation.intended_meaning_native,
       transcript,
       nativeLanguage,
+      correctionStyle,
     );
 
     setPending({ stage: "processing", step: "Comparing versions…", transcript });

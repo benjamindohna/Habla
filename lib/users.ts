@@ -1,5 +1,7 @@
 import { getDb } from "./db";
 
+export type CorrectionStyle = "natural" | "transcript_aware";
+
 export interface User {
   id: number;
   email: string;
@@ -7,6 +9,7 @@ export interface User {
   nativeLanguage: string;
   level: number;
   interestsText: string;
+  correctionStyle: CorrectionStyle;
   createdAt: number;
 }
 
@@ -17,6 +20,7 @@ interface UserRow {
   native_language: string;
   level: number;
   interests_text: string;
+  correction_style: string;
   created_at: number;
 }
 
@@ -28,6 +32,7 @@ function rowToUser(row: UserRow): User {
     nativeLanguage: row.native_language,
     level: row.level,
     interestsText: row.interests_text,
+    correctionStyle: (row.correction_style === "transcript_aware" ? "transcript_aware" : "natural"),
     createdAt: row.created_at,
   };
 }
@@ -102,4 +107,9 @@ export function addUserInterest(userId: number, interest: string): void {
 export function setUserInterestsText(userId: number, text: string): void {
   const db = getDb();
   db.prepare("UPDATE users SET interests_text = ? WHERE id = ?").run(text, userId);
+}
+
+export function setUserCorrectionStyle(userId: number, style: CorrectionStyle): void {
+  const db = getDb();
+  db.prepare("UPDATE users SET correction_style = ? WHERE id = ?").run(style, userId);
 }

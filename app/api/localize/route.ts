@@ -3,29 +3,24 @@ import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export async function POST(req: NextRequest) {
-  try {
-    const { intendedMeaning, transcript, nativeLanguage = "German" } = (await req.json()) as {
-      intendedMeaning: string;
-      transcript?: string;
-      nativeLanguage?: string;
-    };
+type Style = "natural" | "transcript_aware";
 
-    if (!intendedMeaning?.trim()) {
-      return NextResponse.json({ error: "No intended meaning provided" }, { status: 400 });
-    }
+function naturalPrompt(nativeLanguage: string): string {
+  return `You are a native Spanish speaker. Your job is to express the given meaning in natural, everyday Spanish as an average local Spaniard would say it in casual conversation.
 
-    const transcriptLine = transcript?.trim()
-      ? `TRANSCRIPT (what the learner actually said): "${transcript.trim()}"`
-      : `TRANSCRIPT: (not provided)`;
+Rules:
+- Not textbook Spanish. Not overly formal. Natural, local, everyday speech.
+- Preserve EVERY clause from the meaning, even short tags or seemingly redundant phrases. Use multiple sentences if needed.
+- The output is in Spanish. The input meaning is in ${nativeLanguage}.
+- Always write numbers as words, never as digits.
+- End with appropriate punctuation.
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: `You are a Spanish-language correction engine for a learner.
+Return ONLY valid JSON:
+{ "local_version_es": "string" }`;
+}
+
+function transcriptAwarePrompt(nativeLanguage: string): string {
+  return `You are a Spanish-language correction engine for a learner.
 
 You receive two inputs:
 - TRANSCRIPT: what the learner actually said. May mix Spanish and ${nativeLanguage}, may have grammar errors or unnatural phrasing.
@@ -45,12 +40,43 @@ Other rules:
 - End with appropriate punctuation.
 
 Return ONLY valid JSON:
-{ "local_version_es": "string" }`,
-        },
-        {
-          role: "user",
-          content: `${transcriptLine}\nINTENT: "${intendedMeaning}"`,
-        },
+{ "local_version_es": "string" }`;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const {
+      intendedMeaning,
+      transcript,
+      nativeLanguage = "German",
+      style = "natural",
+    } = (await req.json()) as {
+      intendedMeaning: string;
+      transcript?: string;
+      nativeLanguage?: string;
+      style?: Style;
+    };
+
+    if (!intendedMeaning?.trim()) {
+      return NextResponse.json({ error: "No intended meaning provided" }, { status: 400 });
+    }
+
+    const useTranscript = style === "transcript_aware" && transcript?.trim();
+
+    const systemPrompt = useTranscript
+      ? transcriptAwarePrompt(nativeLanguage)
+      : naturalPrompt(nativeLanguage);
+
+    const userContent = useTranscript
+      ? `TRANSCRIPT: "${transcript!.trim()}"\nINTENT: "${intendedMeaning}"`
+      : intendedMeaning;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
       ],
       temperature: 0.2,
     });

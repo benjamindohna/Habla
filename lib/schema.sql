@@ -1,13 +1,16 @@
 -- Habla local database schema. Re-applied idempotently on every server boot.
 
 CREATE TABLE IF NOT EXISTS users (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  email           TEXT NOT NULL UNIQUE,
-  password_hash   TEXT NOT NULL,
-  native_language TEXT NOT NULL DEFAULT 'German',
-  level           INTEGER NOT NULL DEFAULT 30,
-  interests_text  TEXT NOT NULL DEFAULT '',
-  created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  email            TEXT NOT NULL UNIQUE,
+  password_hash    TEXT NOT NULL,
+  native_language  TEXT NOT NULL DEFAULT 'German',
+  level            INTEGER NOT NULL DEFAULT 30,
+  interests_text   TEXT NOT NULL DEFAULT '',
+  -- 'natural'           = localize ignores transcript, generates fresh natural Spanish
+  -- 'transcript_aware'  = localize sees transcript and stays close to user's wording where correct
+  correction_style TEXT NOT NULL DEFAULT 'natural' CHECK (correction_style IN ('natural','transcript_aware')),
+  created_at       INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
 CREATE TABLE IF NOT EXISTS user_interests (

@@ -9,6 +9,8 @@ interface TopicWithKind extends Topic {
   kind: "match" | "related" | "random";
 }
 
+type CorrectionStyle = "natural" | "transcript_aware";
+
 interface Me {
   id: number;
   email: string;
@@ -16,6 +18,7 @@ interface Me {
   level: number;
   interests: string[];
   interestsText: string;
+  correctionStyle: CorrectionStyle;
 }
 
 type AppMode = { kind: "home" } | { kind: "chat"; topic: string };
@@ -87,6 +90,23 @@ export default function Page() {
     router.push("/login");
   }
 
+  async function handleStyleChange(style: CorrectionStyle) {
+    if (!me || me.correctionStyle === style) return;
+    // Optimistic update — revert if the server rejects.
+    const previous = me.correctionStyle;
+    setMe({ ...me, correctionStyle: style });
+    try {
+      const res = await fetch("/api/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ correctionStyle: style }),
+      });
+      if (!res.ok) throw new Error("update failed");
+    } catch {
+      setMe({ ...me, correctionStyle: previous });
+    }
+  }
+
   function enterChat(topic: Topic) {
     setMode({ kind: "chat", topic: topic.es });
     // Fire-and-forget: record the tap so future topic generations drift toward
@@ -117,6 +137,7 @@ export default function Page() {
       <ConversationView
         topic={mode.topic}
         nativeLanguage={me.nativeLanguage}
+        correctionStyle={me.correctionStyle}
         onBack={backToHome}
         onLogout={handleLogout}
       />
@@ -127,7 +148,18 @@ export default function Page() {
   const showLoading = topics === null;
   return (
     <main className="flex min-h-screen flex-col items-center px-4 py-8">
-      <div className="w-full max-w-xl flex items-center justify-end mb-12">
+      <div className="w-full max-w-xl flex items-center justify-between mb-12">
+        <label className="flex items-center gap-2 text-xs text-neutral-400">
+          Correction style
+          <select
+            value={me.correctionStyle}
+            onChange={(e) => handleStyleChange(e.target.value as CorrectionStyle)}
+            className="text-xs text-neutral-600 bg-transparent border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:border-neutral-400 cursor-pointer"
+          >
+            <option value="natural">Natural Spanish</option>
+            <option value="transcript_aware">Stay close to my words</option>
+          </select>
+        </label>
         <button
           onClick={handleLogout}
           className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"

@@ -23,6 +23,7 @@ function migrate(db: DbHandle): void {
   ensureColumn(db, "user_interests", "is_recent", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "users", "current_set_id", "INTEGER REFERENCES topic_sets(id)");
   ensureColumn(db, "users", "next_set_id", "INTEGER REFERENCES topic_sets(id)");
+  ensureColumn(db, "users", "correction_style", "TEXT NOT NULL DEFAULT 'natural'");
 }
 
 function initDb(): DbHandle {

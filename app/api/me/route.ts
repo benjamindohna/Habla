@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { getUserById, getUserInterests } from "@/lib/users";
+import { getUserById, getUserInterests, setUserCorrectionStyle, type CorrectionStyle } from "@/lib/users";
 
 export async function GET() {
   const session = await getSession();
@@ -22,5 +22,22 @@ export async function GET() {
     level: user.level,
     interests,
     interestsText: user.interestsText,
+    correctionStyle: user.correctionStyle,
   });
+}
+
+export async function PATCH(req: NextRequest) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const body = (await req.json().catch(() => ({}))) as { correctionStyle?: string };
+  const next = body.correctionStyle;
+  if (next !== "natural" && next !== "transcript_aware") {
+    return NextResponse.json({ error: "Invalid correctionStyle" }, { status: 400 });
+  }
+
+  setUserCorrectionStyle(session.userId, next as CorrectionStyle);
+  return NextResponse.json({ ok: true, correctionStyle: next });
 }
