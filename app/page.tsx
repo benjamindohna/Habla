@@ -92,6 +92,7 @@ export default function Page() {
   // Topics for the home grid. null = loading; [] = error fetching first set.
   const [topics, setTopics] = useState<TopicWithKind[] | null>(null);
   const [topicsError, setTopicsError] = useState<string | null>(null);
+  const [rerolling, setRerolling] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,15 +109,12 @@ export default function Page() {
     };
   }, [router]);
 
-  // Fetch the first set of topics once the user is loaded.
+  // Fetch the current set on mount. Should be instant if `npm run warm` was
+  // run; otherwise the endpoint generates lazily and waits.
   useEffect(() => {
     if (!me || topics !== null) return;
     let cancelled = false;
-    fetch("/api/topics", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ exclude: [] }),
-    })
+    fetch("/api/topics/current")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load topics"))))
       .then((data: { topics: TopicWithKind[] }) => {
         if (!cancelled) setTopics(data.topics);
@@ -131,6 +129,22 @@ export default function Page() {
       cancelled = true;
     };
   }, [me, topics]);
+
+  async function handleReroll() {
+    if (rerolling) return;
+    setRerolling(true);
+    setTopicsError(null);
+    try {
+      const res = await fetch("/api/topics/reroll", { method: "POST" });
+      if (!res.ok) throw new Error("Re-roll failed");
+      const data = (await res.json()) as { topics: TopicWithKind[] };
+      setTopics(data.topics);
+    } catch (err) {
+      setTopicsError((err as Error).message);
+    } finally {
+      setRerolling(false);
+    }
+  }
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -221,19 +235,18 @@ export default function Page() {
             Hola, ¿de qué quieres hablar hoy?
           </h1>
 
-          <TopicGrid topics={topics ?? []} onSelect={enterChat} disabled={showLoading} />
+          <TopicGrid topics={topics ?? []} onSelect={enterChat} disabled={showLoading || rerolling} />
 
           {topicsError && (
             <p className="text-xs text-red-500">{topicsError}</p>
           )}
 
           <button
-            onClick={() => { /* Phase 4 will wire re-roll */ }}
-            disabled
+            onClick={handleReroll}
+            disabled={showLoading || rerolling}
             className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Re-roll comes in Phase 4"
           >
-            {showLoading ? "Loading topics…" : "Re-roll topics"}
+            {showLoading ? "Loading topics…" : rerolling ? "Re-rolling…" : "Re-roll topics"}
           </button>
         </div>
       </main>

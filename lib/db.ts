@@ -21,6 +21,8 @@ function migrate(db: DbHandle): void {
   // SQLite has no ADD COLUMN IF NOT EXISTS — apply additive migrations explicitly.
   ensureColumn(db, "conversations", "ended_at", "INTEGER");
   ensureColumn(db, "user_interests", "is_recent", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "users", "current_set_id", "INTEGER REFERENCES topic_sets(id)");
+  ensureColumn(db, "users", "next_set_id", "INTEGER REFERENCES topic_sets(id)");
 }
 
 function initDb(): DbHandle {

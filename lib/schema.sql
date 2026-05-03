@@ -47,3 +47,14 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages(conversation_id, id);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id, id);
+
+-- Topic sets: each row is one generated 9-tile set. users.current_set_id and
+-- users.next_set_id point to the active and preloaded sets respectively;
+-- everything else for that user is archived (capped at 4 most-recent by prune).
+CREATE TABLE IF NOT EXISTS topic_sets (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  topics_json  TEXT NOT NULL,
+  generated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_topic_sets_user_id ON topic_sets(user_id, id DESC);

@@ -214,40 +214,49 @@ Each phase ends in a working app. Sub-bullets are tasks; **Files** lists what ge
 
 ---
 
-### Phase 3 — Topic generation API (5-3-1, no-overlap)
-*Goal: tiles come from an LLM call shaped by the user's interests, with no overlap across the 4 sets shown in a single home-screen visit.*
+### Phase 3 — Topic generation (LLM, 5-3-1 split)
+*Goal: a function that produces one set of 9 topics for a user, given an exclusion list.*
 
-- Create `POST /api/topics` taking `{ exclude: string[] }` (already-shown topics in this visit) and reading the user from session. Returns 9 topic strings: 5 directly matching the user's interests, 3 adjacent/related, 1 random. Order randomised server-side.
-- LLM: `gpt-4o-mini`, `response_format: json_object`. Prompt receives:
+- `lib/generateTopics.ts`: `generateTopicsForUser(userId, exclude[])` returns 9 topics `{ es, native, kind: "match"|"related"|"random" }`. Single `gpt-4o-mini` call with `response_format: json_object`.
+- Prompt receives:
   - `interests_text` (the narrative)
-  - The 12 tags from `user_interests`, with the 3–5 marked `is_recent=1` listed first / flagged
-  - The exclusion list (already-shown topics)
-- Prompt explains the 5-3-1 split, tells the LLM to lean on `is_recent` tags first when picking the 5 matches, accepts vague-or-specific phrasing ("Champions League", "Johan Cruijff's philosophy", "Formula 1 in 2026"), and avoids near-duplicates of the exclusion list. Topic phrasing is in the user's native language.
-- Returns `{ topics: [{ text, kind: "match"|"related"|"random" }] }`.
-- Wire `home` to fetch `/api/topics` on mount with `exclude: []` and render the result.
+  - The 12 tags from `user_interests`, with `is_recent=1` flagged
+  - The exclusion list of already-shown topics
+- Prompt explains the 5-3-1 split, tells the LLM to lean on `is_recent` tags first when picking the 5 matches, accepts vague-or-specific phrasing, and avoids near-duplicates of the exclusion list.
+- Order randomised server-side.
 
-**Files:** `app/api/topics/route.ts` (new), `app/page.tsx` (wire fetch), `components/TopicGrid.tsx` (props update).
+**Files:** `lib/generateTopics.ts` (new).
 
-**Done when:** every page load shows nine LLM-generated tiles tailored to the seeded user's interests.
+**Done when:** the helper produces well-shaped, personalised topic sets when called directly.
 
 ---
 
-### Phase 4 — Re-roll + preloading (4-set budget)
-*Goal: instant re-rolls, no overlap across sets, button greys out after the 4th set.*
+### Phase 4 — Persistent topic sets (server-side, zero-latency UX)
+*Goal: every load and every re-roll is instant. State lives in the DB so it survives logout, browser restart, and time.*
 
-- Per home-screen visit, support up to **4 sets** of 9 topics each (1 initial + 3 re-rolls). All 36 topics are disjoint within the visit.
-- State held in `app/page.tsx`:
-  - `sets: TopicSet[]` — every set generated this visit (used as the exclusion list).
-  - `currentIndex: number` (0..3) — which set is visible.
-  - `next: TopicSet | null` — preloaded next set.
-  - `rerollsRemaining: number` (3..0) — initial 3, decremented on each re-roll.
-- On mount: fetch set 0 with `exclude=[]`, render it, then fire-and-forget fetch set 1 with `exclude=set0` into `next`.
-- On re-roll click:
-  - Reject if `rerollsRemaining === 0`.
-  - Swap `next → current`, push it into `sets`, increment `currentIndex`, decrement `rerollsRemaining`.
-  - If `rerollsRemaining > 0`: fire next `POST /api/topics` with `exclude = flatten(all sets so far)` to refill `next`. If `rerollsRemaining === 0`: skip the preload — the budget is exhausted.
-- Re-roll button visual states: enabled (default), spinner (if user re-rolls before `next` lands — rare), greyed-out when `rerollsRemaining === 0` (with tooltip: "no more topics this round").
-- Visit ends (and the budget resets) when the user enters a chat or reloads the page.
+**Architecture.** Each user owns a small ring of 9-tile sets stored in `topic_sets`:
+- `users.current_set_id` → the visible set
+- `users.next_set_id`    → the preloaded set ready for re-roll
+- Up to 4 archived rows (anything else for that user, ordered by `id DESC`, pruned)
+
+On re-roll: `current := next`, `next := NULL`, prune to 4 archives, return new current immediately, fire-and-forget background generation of new `next`. The `getExclusionList()` helper unions topics across all of the user's `topic_sets` rows so generations across sessions never repeat each other (~54 topics excluded by default).
+
+**Lifecycle.**
+- *New user (signup):* signup handler must call `ensureUserTopicSets()` for the new user — see [`BACKLOG.md`](./BACKLOG.md). Until signup exists, `npm run warm <email>` does it manually.
+- *First load after warm:* `GET /api/topics/current` returns instantly from DB.
+- *Re-roll:* `POST /api/topics/reroll` rotates and returns instantly (or pays the LLM latency once if background gen lagged behind a fast re-roll — synchronous fallback).
+- *Phase 7 interest change:* `invalidateNextSet(userId)` drops the now-stale `next`; the user's next request lazily regenerates it.
+- *Re-roll budget:* none. Re-roll always available — exclusion-history depth (5–6 sets in DB) is the natural variety guarantee.
+
+**Files:**
+- `lib/topicSets.ts` (new) — DB pointers, rotation, prune, exclusion-list, `ensureUserTopicSets`, `invalidateNextSet`, `generateAndStoreCurrent/Next`.
+- `app/api/topics/current/route.ts` (new) — GET current; lazily warms if missing.
+- `app/api/topics/reroll/route.ts` (new) — POST rotate; instant response, background regen of next.
+- `scripts/warm.ts` (new) + `npm run warm` — ensure current+next for one or all users.
+- `app/page.tsx` (edit) — fetch `/api/topics/current` on mount; wire re-roll button.
+- Schema: `topic_sets` table + `users.current_set_id` + `users.next_set_id` (added in this phase's migration).
+
+**Done when:** login → home shows tiles instantly; re-roll swaps tiles instantly; closing and reopening the browser shows the same tiles unless re-rolled or interests changed.
 
 **Files:** `app/page.tsx` (state mgmt), `lib/hooks/useTopicQueue.ts` (new — encapsulates the queue + exclusion logic).
 
