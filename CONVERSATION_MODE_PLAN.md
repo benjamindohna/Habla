@@ -325,6 +325,9 @@ Each phase ends in a working app. Sub-bullets are tasks; **Files** lists what ge
 
 ## 5. Out of scope (explicitly deferred)
 
+> Items that fall out during the build live in [`BACKLOG.md`](./BACKLOG.md), with a reference back to the phase or change that triggered them. Add to it whenever something gets deferred mid-implementation.
+
+
 - Sign-up flow (new accounts via UI). Add a user manually via `scripts/seed.ts` for now.
 - Settings page for level / native language.
 - Conversation history browser.
