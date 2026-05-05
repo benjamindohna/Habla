@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
+import { appendMessage, createConversation } from "@/lib/conversations";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -50,7 +51,16 @@ Return ONLY valid JSON:
       throw new Error("Model returned no usable opener");
     }
 
-    return NextResponse.json({ text: parsed.text.trim() });
+    // Persist: create the conversation row and store the opener as the first
+    // message so future /turn calls can rebuild context from the DB.
+    const conversationId = createConversation(user.id, topic.trim());
+    appendMessage({
+      conversationId,
+      role: "ai",
+      textEs: parsed.text.trim(),
+    });
+
+    return NextResponse.json({ conversationId, text: parsed.text.trim() });
   } catch (err) {
     console.error("[/api/converse/start]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

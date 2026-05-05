@@ -95,6 +95,7 @@ export default function ConversationView({
     { id: openerIdRef.current, role: "ai", loading: true },
   ]);
   const [pending, setPending] = useState<PendingStatus>({ stage: "idle" });
+  const [conversationId, setConversationId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Fetch the LLM-generated opener on mount.
@@ -106,8 +107,9 @@ export default function ConversationView({
       body: JSON.stringify({ topic }),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load opener"))))
-      .then((data: { text: string }) => {
+      .then((data: { conversationId: number; text: string }) => {
         if (cancelled) return;
+        setConversationId(data.conversationId);
         setMessages((prev) =>
           prev.map((m) =>
             m.id === openerIdRef.current && m.role === "ai"
@@ -201,22 +203,67 @@ export default function ConversationView({
     }
   }
 
-  function handleDone(messageId: string) {
-    setMessages((prev) => {
-      const updated = prev.map((m) =>
+  async function handleDone(messageId: string) {
+    const userMsg = messages.find((m) => m.id === messageId);
+    if (!userMsg || userMsg.role !== "user" || conversationId === null) return;
+
+    // Mark this user bubble as Done (hides its Done button).
+    setMessages((prev) =>
+      prev.map((m) =>
         m.id === messageId && m.role === "user" ? { ...m, doneAt: Date.now() } : m,
+      ),
+    );
+
+    // Append a loading AI bubble while we wait for the reply.
+    const loadingId = crypto.randomUUID();
+    setMessages((prev) => [...prev, { id: loadingId, role: "ai", loading: true }]);
+
+    try {
+      const res = await fetch("/api/converse/turn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId,
+          userTextEs: userMsg.result.local_version_es,
+          userRaw: userMsg.result.transcript_raw,
+          segments: userMsg.result.pairs,
+        }),
+      });
+      if (!res.ok) throw new Error("Reply failed");
+      const data = (await res.json()) as { text: string };
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === loadingId && m.role === "ai"
+            ? { ...m, text: data.text, loading: false }
+            : m,
+        ),
       );
-      // Phase 6 stub — Phase 7 replaces this with the real /api/converse/turn call.
-      return [
-        ...updated,
-        {
-          id: crypto.randomUUID(),
-          role: "ai",
-          text: "(Phase 7 will generate a real reply here.)",
-          muted: true,
-        },
-      ];
-    });
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === loadingId && m.role === "ai"
+            ? {
+                ...m,
+                text: `(Couldn't load reply: ${(err as Error).message})`,
+                loading: false,
+                muted: true,
+              }
+            : m,
+        ),
+      );
+    }
+  }
+
+  function handleBack() {
+    // Fire-and-forget: harvest interests + invalidate the stale 'next' topic
+    // set so future re-rolls reflect this conversation. User navigates home
+    // immediately; if the network call lags or fails, no UX impact.
+    if (conversationId !== null) {
+      fetch(`/api/conversations/${conversationId}/extract`, {
+        method: "POST",
+      }).catch(() => {});
+    }
+    onBack();
   }
 
   // Only the latest user bubble (whose Done hasn't been clicked yet) shows the button.
@@ -229,7 +276,7 @@ export default function ConversationView({
       <header className="border-b border-neutral-200 bg-white">
         <div className="w-full max-w-3xl mx-auto flex items-center justify-between px-4 py-3">
           <button
-            onClick={onBack}
+            onClick={handleBack}
             className="text-sm text-neutral-500 hover:text-neutral-800 transition-colors"
           >
             ← Back
