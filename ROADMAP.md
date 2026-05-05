@@ -53,7 +53,66 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
 
   **Mastered ≠ done.** A stage-6 word still appears occasionally (every ~60 days, plus the control-sweep mixed in earlier). If the user fails it, it drops back per the lapse rules — no special "mastered" protection.
 
-  **Sort within a session:** due words ordered by `next_due_at ASC`, with new words sprinkled by frequency rank (most fundamental first) so the learner gets the highest-utility words first.
+  **Sort within a session:** due words ordered by `next_due_at ASC`, with new words inserted at the position determined by the **personalised LLM ranking** below.
+
+  ### Personalised word ranking — LLM-driven 3-anchor binary search
+
+  Instead of ranking by static corpus frequency, each user's word stack is ranked by a personalised priority that weighs **target-language importance** + **the user's own interests**. New words are inserted at their personally-correct position via async background search.
+
+  **Why personalised, not static frequency:**
+  - A football fan needs *marcador* and *entrenador* high in their stack even though those are mid-frequency overall.
+  - A hard-sci-fi reader benefits from *gravedad*, *tripulación*, *hibernación* much more than the corpus rank suggests.
+  - Static frequency is a good universal signal but a weak personal signal.
+
+  **Algorithm: 3-anchor binary search.**
+
+  Each round picks 3 anchor words from the middle of the current search range. The LLM is asked where the new word fits among the 3 anchors. With 3 anchors there are 4 possible buckets, so each round eliminates ~75% of the search space.
+
+  - Stack of N words → roughly **log₄(N) rounds** until convergence
+  - 10,000-word stack → **~7 LLM calls** per insertion
+  - Each call ~1s + ~$0.0001 → **~7s and ~$0.0007 per word**
+  - Runs **async in the background** while the user keeps interacting — no blocking UX
+
+  **Edge cases:**
+  - Empty stack: insert at position 0, no LLM call.
+  - Stack < 10 words: skip binary search; one LLM call asks for a full ordering of the existing stack + new word.
+  - Stack ≥ 10: full 3-anchor search.
+
+  **Prompt template** (passed as `system` content in a `gpt-4o-mini` call with `response_format: json_object`):
+
+  ```
+  The user is a persona learning ${TARGET_LANGUAGE}.
+
+  Their interests:
+  ${user_interests_list}
+
+  Based on the following two criteria — weighted as shown — rank words by how
+  important they are for THIS user to learn:
+    - Importance in ${TARGET_LANGUAGE} (general frequency / utility): 60%
+    - Importance for the user's interests: 40%
+
+  Compare the new word to the following three anchor words. The new word can
+  be before all three, between them, or after all three.
+
+  New word: "${new_word}"
+
+  Anchor words (in order of decreasing importance):
+    A: "${anchor_A}"
+    B: "${anchor_B}"
+    C: "${anchor_C}"
+
+  Return ONLY valid JSON:
+  { "position": "before_A" | "between_AB" | "between_BC" | "after_C" }
+  ```
+
+  After each call, narrow the search window to the chosen bucket and pick 3 new anchors from its middle. Repeat until the bucket has < 4 items, then insert at the indicated position within it.
+
+  **UX during insertion:**
+  - The new word appears immediately at the end of the stack (or wherever the user happens to be looking) with a subtle *"Wird einsortiert…"* spinner badge.
+  - When the search converges (~7s later), the word animates to its real position. If the user is in vocabulary practice meanwhile, this is invisible — the word just lands somewhere in the queue and shows up at its right time.
+  - Multiple insertions can run in parallel (each word's search is independent).
+
+  **No static frequency list needed.** The LLM has implicit frequency knowledge from training. The static `lib/freq/es.txt` originally planned for Phase 8 is dropped — drop also `freq_rank` from `user_unknown_words` if it ends up unused. Personal rank is the source of truth.
 
   ### Algorithmic future direction
 
@@ -87,7 +146,7 @@ Implementation note: this either opens the topic grid as an overlay, or just spi
 ## Implementation notes
 
 - Dashboard is a thin shell over existing routes — minimal new infra.
-- Vocabulary mode reads from `user_unknown_words` (Phase 8). Sort by `freq_rank ASC NULLS LAST, last_seen DESC`.
+- Vocabulary mode reads from `user_unknown_words` (Phase 8). Sort by personalised priority — see the 3-anchor binary search section above. The `freq_rank` column from the original Phase 8 plan can be dropped if the personalised ranking ends up being the only sort key.
 - "Quick start" can reuse `getCurrentSet()` and just pick one topic at random server-side; or call the LLM for a single fresh topic.
 - Conversation list reads from `conversations` table — already FK'd to user, indexed.
 
