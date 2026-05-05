@@ -1,10 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export interface AIBubbleSegment {
   es: string;
   native?: string;
+}
+
+/**
+ * Defensive whitespace insertion. The LLM is supposed to emit non-tappable
+ * whitespace segments between tappable ones, but it sometimes forgets and
+ * delivers segments back-to-back with no spacing — which renders as one
+ * compressed blob. We compensate by inserting an inert space wherever the
+ * boundary between two segments needs one and doesn't have one.
+ *
+ * Rules at a segment boundary:
+ *  - If either side already has whitespace → no insertion.
+ *  - If previous ends with a "glue-after" char (¿ ¡ « " ' ( [ {) → no insertion.
+ *  - If current starts with a "glue-before" char (, . ; : ! ? » " ' ) ] }) → no insertion.
+ *  - Otherwise → insert a single space.
+ */
+function withInferredSpaces(segments: AIBubbleSegment[]): AIBubbleSegment[] {
+  const GLUE_AFTER_PREV = /[¿¡«"'([{]/;
+  const GLUE_BEFORE_CURR = /[,.;:!?»"')\]}]/;
+  const out: AIBubbleSegment[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    const curr = segments[i];
+    if (!curr.es) continue;
+    const prev = out[out.length - 1];
+    if (prev && prev.es && curr.es) {
+      const lastChar = prev.es.slice(-1);
+      const firstChar = curr.es[0];
+      const hasSpace = /\s/.test(lastChar) || /\s/.test(firstChar);
+      const glued = GLUE_AFTER_PREV.test(lastChar) || GLUE_BEFORE_CURR.test(firstChar);
+      if (!hasSpace && !glued) {
+        out.push({ es: " " });
+      }
+    }
+    out.push(curr);
+  }
+  return out;
 }
 
 interface AIBubbleProps {
@@ -24,6 +59,11 @@ export default function AIBubble({ text, segments, muted = false, loading = fals
   const [lookedUp, setLookedUp] = useState<Set<number>>(new Set());
 
   const bubbleRef = useRef<HTMLDivElement>(null);
+
+  const renderedSegments = useMemo(
+    () => (segments && segments.length > 0 ? withInferredSpaces(segments) : null),
+    [segments],
+  );
 
   // Click-outside closes the open popover.
   useEffect(() => {
@@ -70,9 +110,9 @@ export default function AIBubble({ text, segments, muted = false, loading = fals
       <div ref={bubbleRef} className={`${baseClasses} relative`}>
         {loading ? (
           <PulsingDots />
-        ) : segments && segments.length > 0 ? (
+        ) : renderedSegments ? (
           <span className="whitespace-pre-wrap">
-            {segments.map((seg, i) =>
+            {renderedSegments.map((seg, i) =>
               seg.native ? (
                 <TappableSpan
                   key={i}
