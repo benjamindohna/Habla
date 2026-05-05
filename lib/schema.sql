@@ -22,11 +22,12 @@ CREATE TABLE IF NOT EXISTS user_interests (
 );
 
 CREATE TABLE IF NOT EXISTS user_unknown_words (
-  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  word       TEXT NOT NULL,
-  freq_rank  INTEGER,
-  looked_up  INTEGER NOT NULL DEFAULT 1,
-  last_seen  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  word               TEXT NOT NULL,                                 -- surface form as encountered (lowercased, trimmed)
+  native_translation TEXT,                                          -- literal translation captured at lookup time
+  freq_rank          INTEGER,                                        -- legacy, unused; superseded by personalised ranking
+  looked_up          INTEGER NOT NULL DEFAULT 1,                     -- count of taps on this word
+  last_seen          INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   PRIMARY KEY (user_id, word)
 );
 

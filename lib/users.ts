@@ -113,3 +113,26 @@ export function setUserCorrectionStyle(userId: number, style: CorrectionStyle): 
   const db = getDb();
   db.prepare("UPDATE users SET correction_style = ? WHERE id = ?").run(style, userId);
 }
+
+/**
+ * Records a word/phrase the user looked up. Stores the surface form exactly
+ * (lowercased, trimmed). On repeat lookups, increments looked_up and
+ * refreshes last_seen — and fills native_translation if it was missing.
+ */
+export function recordLookedUpWord(
+  userId: number,
+  word: string,
+  nativeTranslation: string | null,
+): void {
+  const normalized = word.trim().toLowerCase();
+  if (!normalized) return;
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO user_unknown_words (user_id, word, native_translation, looked_up, last_seen)
+     VALUES (?, ?, ?, 1, strftime('%s','now'))
+     ON CONFLICT(user_id, word) DO UPDATE SET
+       looked_up          = looked_up + 1,
+       last_seen          = strftime('%s','now'),
+       native_translation = COALESCE(user_unknown_words.native_translation, excluded.native_translation)`,
+  ).run(userId, normalized, nativeTranslation?.trim() || null);
+}

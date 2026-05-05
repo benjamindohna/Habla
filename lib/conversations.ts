@@ -3,6 +3,16 @@ import type { Pair } from "@/types/correction";
 
 export type MessageRole = "ai" | "user";
 
+/**
+ * One unit of an AI message: either a tappable word/phrase (with a `native`
+ * translation) or a non-tappable string (punctuation, spacing). Renderer
+ * concatenates `es` fields in order to reconstruct the message.
+ */
+export interface Segment {
+  es: string;
+  native?: string;
+}
+
 export interface ConversationRow {
   id: number;
   user_id: number;
@@ -21,12 +31,18 @@ export interface MessageRow {
   created_at: number;
 }
 
+/**
+ * Note: `segments_json` is overloaded by role.
+ *  - role='user': the Pair[] alignment from /api/segment (correction view).
+ *  - role='ai':   the Segment[] from the converse generation (tap-to-translate).
+ * Same column, same JSON storage, different shape per role.
+ */
 export interface Message {
   id: number;
   role: MessageRole;
   textEs: string;
   userRaw: string | null;
-  segments: Pair[] | null;
+  segments: Pair[] | Segment[] | null;
   createdAt: number;
 }
 
@@ -36,7 +52,7 @@ function rowToMessage(row: MessageRow): Message {
     role: row.role,
     textEs: row.text_es,
     userRaw: row.user_raw,
-    segments: row.segments_json ? (JSON.parse(row.segments_json) as Pair[]) : null,
+    segments: row.segments_json ? JSON.parse(row.segments_json) : null,
     createdAt: row.created_at,
   };
 }
@@ -67,7 +83,7 @@ export function appendMessage(input: {
   role: MessageRole;
   textEs: string;
   userRaw?: string | null;
-  segments?: Pair[] | null;
+  segments?: Pair[] | Segment[] | null;
 }): number {
   const result = getDb()
     .prepare(

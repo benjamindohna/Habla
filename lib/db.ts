@@ -24,6 +24,7 @@ function migrate(db: DbHandle): void {
   ensureColumn(db, "users", "current_set_id", "INTEGER REFERENCES topic_sets(id)");
   ensureColumn(db, "users", "next_set_id", "INTEGER REFERENCES topic_sets(id)");
   ensureColumn(db, "users", "correction_style", "TEXT NOT NULL DEFAULT 'natural'");
+  ensureColumn(db, "user_unknown_words", "native_translation", "TEXT");
 }
 
 function initDb(): DbHandle {

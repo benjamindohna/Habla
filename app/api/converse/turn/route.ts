@@ -7,6 +7,7 @@ import {
   appendMessage,
   getConversation,
   getMessages,
+  type Segment,
 } from "@/lib/conversations";
 import type { Pair } from "@/types/correction";
 
@@ -56,9 +57,10 @@ export async function POST(req: NextRequest) {
 
   const target = describeTargetLanguage(DEFAULT_TARGET);
   const targetName = DEFAULT_TARGET.language;
+  const nativeLanguage = user.nativeLanguage;
   const targetBand = `${user.level + 5}-${user.level + 10}`;
 
-  const systemPrompt = `You are a native ${target} speaker having a casual conversation with a language learner.
+  const systemPrompt = `You are a native ${target} speaker having a casual conversation with a language learner whose native language is ${nativeLanguage}.
 
 Topic of the conversation: "${conversation.topic}"
 Learner level: ${user.level}/100 (0 = absolute beginner, 100 = sophisticated native speaker).
@@ -71,8 +73,20 @@ Behave like a real chat partner:
 - Don't comment on the learner's language, grammar, vocabulary, or accent. They have a separate correction system handling that. Just respond to the content.
 - Stay in ${target}: use vocabulary, idioms, named entities, and register that fit this variety. Do not drift to other regions or registers.
 
+ALSO segment the reply for tap-to-translate. Return an ordered array of segments whose "es" fields, concatenated in order, exactly reconstruct the reply.
+- Each meaningful word or multi-word unit gets a segment with a "native" field containing the literal ${nativeLanguage} translation in the SAME grammatical form ("sería" → "wäre", not "sein"). Do NOT lemmatize.
+- Group multi-word idioms, fixed expressions, and tightly-bound collocations as ONE segment with one translation. Examples in ${targetName}: "buenos días", "tener ganas", "darse cuenta", "echar de menos", "por favor".
+- Punctuation, opening question/exclamation marks, and standalone whitespace go in segments WITHOUT a "native" field — they're not tappable.
+- The segments must reconstruct the message exactly. If you join all "es" values back together, you must get the original "text".
+
 Return ONLY valid JSON:
-{ "text": "<your next message in ${targetName}>" }`;
+{
+  "text": "<your next message in ${targetName}>",
+  "segments": [
+    { "es": "<token>", "native": "<${nativeLanguage} translation>" },
+    { "es": "<punctuation or whitespace>" }
+  ]
+}`;
 
   // Build message array: system + alternating turns from history.
   const messages: { role: "system" | "assistant" | "user"; content: string }[] = [
@@ -94,18 +108,31 @@ Return ONLY valid JSON:
     });
 
     const raw = completion.choices[0].message.content ?? "{}";
-    const parsed = JSON.parse(raw) as { text?: unknown };
+    const parsed = JSON.parse(raw) as { text?: unknown; segments?: unknown };
     if (typeof parsed.text !== "string" || !parsed.text.trim()) {
       throw new Error("Model returned no usable reply");
     }
+
+    const segments: Segment[] | null = Array.isArray(parsed.segments)
+      ? (parsed.segments as Array<{ es?: unknown; native?: unknown }>)
+          .filter((s) => s != null && typeof s.es === "string")
+          .map((s) => {
+            const out: Segment = { es: s.es as string };
+            if (typeof s.native === "string" && s.native.trim()) {
+              out.native = s.native.trim();
+            }
+            return out;
+          })
+      : null;
 
     appendMessage({
       conversationId,
       role: "ai",
       textEs: parsed.text.trim(),
+      segments,
     });
 
-    return NextResponse.json({ text: parsed.text.trim() });
+    return NextResponse.json({ text: parsed.text.trim(), segments });
   } catch (err) {
     console.error("[/api/converse/turn]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
