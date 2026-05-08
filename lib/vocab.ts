@@ -121,6 +121,143 @@ Return ONLY the description string. No JSON, no quotes, no explanation.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Vocab judge — evaluates the learner's answer in a vocab review.
+// Replaces all the deterministic match logic (exact match / Levenshtein /
+// synonym lists / lemmatize-and-compare) with a single LLM call that
+// understands semantic equivalence, typos, missing articles, polysemy.
+//
+// Outputs one of three single-character verdicts:
+//   "1" — answer matches the tested sense → SRS stage advance
+//   "X" — answer matches a DIFFERENT known sense of the word → stage
+//          unchanged, UI tells the learner to provide the other meaning
+//   "0" — answer is wrong, empty, or just echoes the target word → lapse
+//
+// Cost: gpt-4o-mini, ~250 input + ~1-3 output tokens. With OpenAI's
+// prompt caching of the static examples block, ~$0.000018 per call.
+// At 40 reviews/day: ~$0.02/month. Negligible.
+// ─────────────────────────────────────────────────────────────────────────
+
+export type VocabJudgement = "1" | "X" | "0";
+
+export interface JudgeArgs {
+  /** The target-language word being tested (surface form, with original casing). */
+  target_word: string;
+  /** The English sense-key for the row being tested. */
+  tested_description: string;
+  /** English sense-keys of OTHER rows for the same target_word_lower in
+   *  this learner's vocab list. Empty array if monosemous. */
+  other_descriptions: string[];
+  /** The learner's typed/spoken answer in their native language. */
+  user_answer: string;
+  /** e.g. "Spanish". */
+  target_language: string;
+  /** e.g. "German". */
+  native_language: string;
+}
+
+/**
+ * Decide whether the learner's answer is an acceptable native-language
+ * translation of the tested sense.
+ *
+ * Robust to:
+ *  - missing/extra articles, capitalisation, minor typos
+ *  - synonymous wording
+ *  - prompt-injection attempts (output range is constrained to 1/X/0)
+ *
+ * Conservative parsing: if the model output doesn't contain 1/X/0,
+ * defaults to "0" (lapse). False rejects are reparable next review;
+ * accepting garbage would corrupt SRS state.
+ */
+export async function judgeVocabAnswer(args: JudgeArgs): Promise<VocabJudgement> {
+  const others =
+    args.other_descriptions.length > 0
+      ? `[${args.other_descriptions.map((s) => `"${s}"`).join(", ")}]`
+      : "(none)";
+
+  const prompt = `You are evaluating a vocabulary review answer for a language learner.
+The learner is studying ${args.target_language}; their native language is ${args.native_language}.
+
+You receive:
+- A ${args.target_language} word being tested.
+- The SENSE of this word being tested, described in English.
+- Other known senses of the same word in this learner's vocab list (may be empty).
+- The learner's answer in ${args.native_language}.
+
+Decide whether the learner's answer is an acceptable ${args.native_language} translation of the TESTED sense.
+
+Be LENIENT on:
+- missing or extra articles ("Hund" ≈ "der Hund")
+- synonymous wording ("Bank" ≈ "Geldinstitut")
+- minor typos ("Sitzbqnk" → accept as "Sitzbank")
+- capitalisation
+- minor inflection differences (singular ≈ plural if the sense is the same)
+
+Be STRICT on:
+- actual meaning mismatch
+- empty answers
+- the learner just echoing the target word back instead of translating
+- answers in the wrong language
+
+Output exactly ONE character, no other text:
+- 1  the answer matches the TESTED sense
+- X  the answer does NOT match the tested sense, but DOES match one of the listed other senses (only possible if other senses are listed)
+- 0  the answer is wrong, empty, or just echoes the target word
+
+Examples (target Spanish, native German):
+
+Tested word: "banco" — sense: "long bench to sit on"
+Other senses: ["financial institution"]
+  "Sitzbank"           → 1
+  "die Sitzbank"       → 1   (extra article, accept)
+  "sitzbank"           → 1   (lowercase, accept)
+  "Sitzbqnk"           → 1   (minor typo, accept)
+  "Bank zum Sitzen"    → 1   (synonym phrasing, accept)
+  "Bank"               → X   (matches the other sense)
+  "Geldinstitut"       → X   (synonym of the other sense)
+  "Schrank"            → 0   (unrelated)
+  ""                   → 0   (empty)
+  "banco"              → 0   (just echoed the target word)
+
+Tested word: "comer" — sense: "to eat (food, meal)"
+Other senses: (none)
+  "essen"              → 1
+  "fressen"            → 1   (register-different synonym, accept)
+  "isst"               → 1   (different inflection, same meaning, accept)
+  "trinken"            → 0   (different meaning)
+  "comer"              → 0   (echoed target word)
+
+Tested word: "haya impresionado" — sense: "has impressed (subjunctive perfect)"
+Other senses: (none)
+  "hat beeindruckt"    → 1
+  "beeindruckt hat"    → 1   (different word order, same meaning, accept)
+  "beeindrucken"       → 0   (infinitive, doesn't carry the perfect aspect)
+
+Now evaluate.
+
+Tested word: "${args.target_word}"
+Sense being tested: "${args.tested_description}"
+Other known senses: ${others}
+Learner's answer: "${args.user_answer}"
+
+Reply with exactly one character: 1, X, or 0. No explanation, no punctuation, no quotes.`;
+
+  const raw = await chatText({
+    task: "chat_light",
+    label: "vocab/judge",
+    systemPrompt: prompt,
+    temperature: 0,
+    maxTokens: 5,
+  });
+
+  // Conservative parse: extract the first 1, X, or 0 in the output.
+  // If none found, default to "0" — better to under-credit a correct
+  // answer (the user re-encounters the card) than to over-credit and
+  // corrupt the SRS schedule.
+  const match = raw.match(/[1X0]/i);
+  return (match?.[0] || "0").toUpperCase() as VocabJudgement;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // LEGACY — Phase A/B casing pipeline. See DISREGARDED_IDEAS.md.
 // Will be removed when the new save flow is wired; kept now so the
 // existing tests stay green.
