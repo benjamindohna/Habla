@@ -114,6 +114,72 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
 
   **No static frequency list needed.** The LLM has implicit frequency knowledge from training. The static `lib/freq/es.txt` originally planned for Phase 8 is dropped — drop also `freq_rank` from `user_unknown_words` if it ends up unused. Personal rank is the source of truth.
 
+  ### Vocabulary canonicalisation (normalisation + casing filter)
+
+  Before any save logic runs, both `target_word` and `native_translation` are run through a canonicalisation pass so the DB never sees superficially different versions of the same string.
+
+  **Standard normalisation** (always applied):
+  ```ts
+  function normalizeVocab(s: string, caseSensitive = false): string {
+    const base = s.normalize("NFC").trim()
+      .replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "")  // edge punctuation
+      .replace(/\s+/g, " ");                      // collapse internal whitespace
+    return caseSensitive ? base : base.toLowerCase();
+  }
+  ```
+  Steps: Unicode NFC composition (so `é` is one code-point, never `e + ◌́`), trim, strip leading/trailing punctuation (Unicode-aware via `\p{P}` — handles `¿`, `¡`, `«`, `»`), collapse internal whitespace. Casing handled separately via the filter below.
+
+  **Diacritics are NEVER stripped.** `si` (if) and `sí` (yes) are different words; `lodash.deburr` and similar are forbidden.
+
+  **Lemmatisation is NEVER applied.** Surface form is preserved per the storage rule (`comió` stays `comió`, not collapsed to `comer`).
+
+  **Casing filter** (only runs when at least one side starts uppercase — runs async, fire-and-forget):
+
+  ```
+  Phase 0 — Fast path
+    If both target_word and native_translation start lowercase:
+      → skip the filter, save with normal lowercase normalisation. Done.
+
+  Phase A — Per-side "always uppercase" check
+    Independently for each side that starts uppercase:
+      LLM judgement: is this word ALWAYS uppercase in this language (proper
+      noun, German noun, brand, etc.) — or is it just incidentally uppercase
+      because of sentence-start position?
+
+      IMPORTANT: the prompt MUST include the other language's translation as
+      reference, so the model knows what the word means. Without that context
+      "Pan" could be either bread (incidental) or a surname (always).
+
+      Result per side: "always" or "incidental"
+
+    Save accordingly:
+      "incidental" → that side stored lowercase
+      "always"     → that side stored with original case
+
+  Phase B — Proper-noun filter
+    ONLY runs when BOTH sides came back "always uppercase" in Phase A.
+
+    LLM judgement: is this a proper noun (person, place, brand)?
+      YES (proper noun):
+        Is the form different across the two languages?
+          DIFFERENT → save with proper case (e.g. Roma / Rom).
+          SAME      → DO NOT save (no learning value, e.g. Madrid / Madrid).
+      NO (not a proper noun): save with respective casings from Phase A.
+  ```
+
+  **Worked examples:**
+
+  | target | native | Phase A (target) | Phase A (native) | Phase B? | Result |
+  |---|---|---|---|---|---|
+  | comer | essen | – | – | no | save (comer / essen) |
+  | Comer (sentence-start) | essen | "incidental" | – | no | save (comer / essen) |
+  | comer | Essen (sentence-start) | – | "incidental" | no | save (comer / essen) |
+  | lluvia | Regen | – | "always" (German noun) | no (only one side) | save (lluvia / Regen) |
+  | Madrid | Madrid | "always" | "always" | yes → same → **skip** | not saved |
+  | Roma | Rom | "always" | "always" | yes → different | save (Roma / Rom) |
+
+  **Cost:** ~$0.00004 per save where the filter triggers (gpt-4o-mini, ~150 input + 30 output tokens per LLM call). The fast path skips the filter entirely for the common all-lowercase case, so most saves are free.
+
   ### Save logic — synonyms vs. polysemy
 
   When a user taps a word in an AI bubble, the client sends `(target_word, native_translation, context)` to the backend. The backend then runs:
