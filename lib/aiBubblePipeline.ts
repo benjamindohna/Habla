@@ -23,7 +23,7 @@
 //   Pros: only translate what's actually looked up; each call laser-focused.
 //   Cons: ~1-2s latency per first tap on a word.
 
-import { chatJSON, chatText } from "./llm";
+import { chatJSON, chatText, type ChatTask } from "./llm";
 import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
 import type { Segment } from "@/types/segment";
 
@@ -238,6 +238,10 @@ export async function translateWordInContext(args: {
   word: string;
   wordIndex: number;
   nativeLanguage: string;
+  /** Override the model tier. Defaults to "chat_precise" (gpt-4o), which
+   *  is what production needs for reliable compound-tense detection.
+   *  Pass "chat_light" (gpt-4o-mini) for cheaper/faster A-B comparisons. */
+  task?: ChatTask;
 }): Promise<WordLookupResult> {
   const target = describeTargetLanguage(DEFAULT_TARGET);
   const targetName = DEFAULT_TARGET.language;
@@ -313,13 +317,15 @@ Return ONLY valid JSON:
   // chat_precise (gpt-4o) for the segment + translate combo: compound-tense
   // detection needs grammatical lookahead (auxiliary → participle) that mini
   // does not do reliably. See "te haya" / "du hat" miscut for the symptom.
+  // Caller can override via args.task to A-B compare.
+  const task = args.task ?? "chat_precise";
   const parsed = await chatJSON<{
     segment?: unknown;
     translation?: unknown;
     indices?: unknown;
   }>({
-    task: "chat_precise",
-    label: "playground/translateWord",
+    task,
+    label: `playground/translateWord/${task}`,
     systemPrompt: prompt,
     temperature: 0.2,
   });

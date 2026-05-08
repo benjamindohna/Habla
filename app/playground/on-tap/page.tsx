@@ -36,9 +36,16 @@ type GenStatus =
   | { stage: "ok"; text: string; topic: string; ms: number }
   | { stage: "error"; message: string };
 
+interface ModelResult {
+  segment: string;
+  translation: string;
+  indices: number[];
+  ms: number;
+}
+
 type LookupState =
   | { kind: "loading" }
-  | { kind: "done"; segment: string; translation: string; indices: number[] }
+  | { kind: "done"; precise: ModelResult; light: ModelResult }
   | { kind: "error"; message: string };
 
 // ── Page ─────────────────────────────────────────────────────────────────
@@ -97,7 +104,7 @@ export default function OnTapPlaygroundPage() {
       return next;
     });
 
-    fetch("/api/playground/translate", {
+    fetch("/api/playground/translate-compare", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -112,23 +119,26 @@ export default function OnTapPlaygroundPage() {
           throw new Error(body.error || `HTTP ${res.status}`);
         }
         return res.json() as Promise<{
-          segment: string;
-          translation: string;
-          indices: number[];
+          precise: ModelResult;
+          light: ModelResult;
         }>;
       })
       .then((data) => {
         const result: LookupState = {
           kind: "done",
-          segment: data.segment,
-          translation: data.translation,
-          indices: data.indices,
+          precise: data.precise,
+          light: data.light,
         };
-        // Populate the cache under every covered index so a later tap on
-        // any related word returns the same answer without a fresh call.
+        // Cache under the union of both models' indices, so a tap on any
+        // word either model considered part of the segment returns the
+        // same comparison instantly.
+        const allIndices = new Set<number>([
+          ...data.precise.indices,
+          ...data.light.indices,
+        ]);
         setLookups((prev) => {
           const next = new Map(prev);
-          for (const idx of data.indices) next.set(idx, result);
+          for (const idx of allIndices) next.set(idx, result);
           return next;
         });
       })
@@ -261,27 +271,51 @@ function Popover({ lookup }: { lookup: LookupState | undefined }) {
   return (
     <span
       role="tooltip"
-      className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-10 whitespace-nowrap rounded-lg bg-neutral-900 text-white text-xs px-3 py-2 shadow-md min-w-[120px]"
+      className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 rounded-lg bg-neutral-900 text-white text-xs px-3 py-2 shadow-md min-w-[200px] max-w-[320px]"
     >
       {!lookup || lookup.kind === "loading" ? (
         <span className="inline-flex items-center gap-2">
           <span className="block w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-          <span className="text-white/80">Übersetze…</span>
+          <span className="text-white/80">Übersetze (4o + mini)…</span>
         </span>
       ) : lookup.kind === "error" ? (
         <span className="text-red-300">{lookup.message}</span>
       ) : (
-        <span className="block text-left leading-snug">
-          <span className="block">{lookup.translation}</span>
-          {lookup.segment.includes(" ") && (
-            <span className="block text-[10px] text-white/60 mt-1">{lookup.segment}</span>
-          )}
+        <span className="block text-left leading-snug space-y-2">
+          <ResultRow label="gpt-4o" tone="bright" result={lookup.precise} />
+          <span className="block border-t border-white/10" />
+          <ResultRow label="gpt-4o-mini" tone="dim" result={lookup.light} />
         </span>
       )}
       <span
         aria-hidden="true"
         className="absolute left-1/2 -translate-x-1/2 top-full -mt-px w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-neutral-900"
       />
+    </span>
+  );
+}
+
+function ResultRow({
+  label,
+  tone,
+  result,
+}: {
+  label: string;
+  tone: "bright" | "dim";
+  result: ModelResult;
+}) {
+  const labelColor = tone === "bright" ? "text-emerald-300" : "text-sky-300";
+  return (
+    <span className="block">
+      <span className={`block text-[10px] uppercase tracking-wide ${labelColor}`}>
+        {label} · {result.ms}ms
+      </span>
+      <span className="block whitespace-normal">{result.translation}</span>
+      {result.segment.includes(" ") && (
+        <span className="block text-[10px] text-white/60 mt-0.5 whitespace-normal">
+          {result.segment}
+        </span>
+      )}
     </span>
   );
 }
