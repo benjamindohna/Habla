@@ -1,4 +1,6 @@
--- Habla local database schema. Re-applied idempotently on every server boot.
+-- Baseline schema. Captures the full target shape as of the migration-runner
+-- introduction. All statements are idempotent (CREATE TABLE/INDEX IF NOT
+-- EXISTS) so a re-run on a partially-populated DB is safe.
 
 CREATE TABLE IF NOT EXISTS users (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -10,6 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
   -- 'natural'           = localize ignores transcript, generates fresh natural Spanish
   -- 'transcript_aware'  = localize sees transcript and stays close to user's wording where correct
   correction_style TEXT NOT NULL DEFAULT 'natural' CHECK (correction_style IN ('natural','transcript_aware')),
+  current_set_id   INTEGER REFERENCES topic_sets(id),
+  next_set_id      INTEGER REFERENCES topic_sets(id),
   created_at       INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
