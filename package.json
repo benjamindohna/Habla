@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "seed": "tsx scripts/seed.ts",
-    "warm": "node --env-file=.env.local --import tsx scripts/warm.ts"
+    "warm": "node --env-file=.env.local --import tsx scripts/warm.ts",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
