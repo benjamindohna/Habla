@@ -222,6 +222,49 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
   - `native_translation` becomes a separator-joined string, e.g. `"Regen / Niederschlag"`.
   - LLM call cost: ~$0.00004 per save where Step 3 fires; happens only when the user looks up a word they already have under a different translation. Most lookups never reach Step 3.
 
+  ### Visual: save flow
+
+  ```mermaid
+  flowchart TD
+      Start([User tippt Wort]) --> Input[/"target_word, native_translation"/]
+      Input --> Norm["normalizeVocab(s, caseSensitive: true)<br/>auf beiden Seiten<br/>(NFC, trim, edge punct, collapse ws —<br/>aber Casing bleibt erhalten)"]
+
+      Norm --> Q1{"Beide Wörter<br/>beginnen lowercase?"}
+      Q1 -- Ja --> Lower["Beide lowercase setzen<br/>(toLowerCase)"]
+      Q1 -- Nein --> PhaseA["<b>Phase A:</b> pro Seite LLM-Check<br/>'always vs incidental uppercase'<br/>(Prompt enthält Übersetzung anderer Sprache als Kontext)"]
+
+      PhaseA --> Q2{"Beide Seiten<br/>'always uppercase'?"}
+      Q2 -- Nein --> ApplyCase["<b>Casings nach Phase A anwenden</b><br/>incidental → lowercase<br/>always → original case behalten<br/><br/><small><i>Häufigster Fall: genau 1 Wort ist uppercase, 1 ist lowercase.<br/>Prüfung lief nur für das uppercase Wort.<br/>Resultat zwischengespeichert, dann weitergegeben an Step 1.</i></small>"]
+      Q2 -- Ja --> PhaseB["<b>Phase B:</b> LLM-Check<br/>'Ist es ein Eigenname?'"]
+
+      PhaseB --> Q3{"Eigenname?"}
+      Q3 -- Nein --> ApplyCase
+      Q3 -- Ja --> Q4{"In beiden Sprachen<br/>gleich geschrieben?"}
+      Q4 -- Ja --> Skip([SKIP — nicht speichern<br/>z.B. Madrid/Madrid])
+      Q4 -- Nein --> KeepCase[Mit Original-Casing speichern<br/>z.B. Roma/Rom]
+
+      Lower --> S1
+      ApplyCase --> S1
+      KeepCase --> S1
+
+      S1{"<b>Step 1:</b> Exaktes Paar<br/>(target_word, native_translation)<br/>schon vorhanden?"}
+      S1 -- Ja --> Lapse["Soft Lapse:<br/>SRS-Stage −1<br/>looked_up++, last_seen aktualisieren"]
+      S1 -- Nein --> S2{"<b>Step 2:</b> target_word existiert<br/>mit anderer Übersetzung?"}
+
+      S2 -- Nein --> NewEntry[Neuer Eintrag<br/>SRS-Stage = 0]
+      S2 -- Ja --> S3["<b>Step 3:</b> LLM klassifiziert<br/>SYNONYM vs DIFFERENT<br/>(nur Übersetzungen, kein Kontext)"]
+
+      S3 --> Q5{"Klassifikation?"}
+      Q5 -- SYNONYM --> Extend["Übersetzung an bestehenden<br/>Eintrag anhängen<br/>z.B. 'Regen / Niederschlag'"]
+      Q5 -- DIFFERENT --> NewPoly[Neuer eigener Eintrag<br/>Polysemie, SRS-Stage = 0]
+
+      Lapse --> Done([Done])
+      NewEntry --> Done
+      Extend --> Done
+      NewPoly --> Done
+      Skip --> Done
+  ```
+
   ### Test logic — multiple entries for the same word
 
   When the SRS scheduler picks an entry to test and shows the target word, the test logic also checks for OTHER entries for the same `target_word` (polysemy case). Behaviour depends on the SRS stage gap between the entry being tested and the other entries:
@@ -256,6 +299,24 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
   ### Algorithmic future direction
 
   If the simple stage system feels rigid after some real usage data, swap in **FSRS** (Free Spaced Repetition Scheduler — currently the best-performing public SRS algorithm, integrated into Anki since 2024). FSRS uses continuous stability/difficulty per card and re-fits to the user's actual recall data. Higher accuracy, more complex to implement. Worth the upgrade if the discrete-stage system shows obvious gaps.
+
+  ### Known limitations / future work
+
+  Things that are not blockers for the initial Spanish↔German build but should be addressed before the system is generalised or shipped to more users.
+
+  - **The casing filter assumes a Latin/Greek/Cyrillic-script language pair.** It works for European languages where proper nouns are capitalised. For target languages **without case** — Chinese, Japanese, Korean, Arabic, Hebrew, Hindi, Thai, etc. — the "both sides always uppercase" trigger never fires, so the proper-noun skip-detection is silently disabled. *上海 / Shanghai* would be saved as a vocab entry even though it's a 1:1 proper noun. Fix when needed: replace the casing trigger with an unconditional LLM proper-noun check, or make the trigger language-aware (per-language config: "has case → use casing trigger; no case → use unconditional LLM check").
+
+  - **Phase A fires even for predictable cases.** When the native side is German, every noun translation (which is most translations) lights up Phase A and gets a confirmatory "always uppercase" answer. ~$0.00004 per save in unnecessary LLM calls. Optimisation: skip Phase A for the German side when the target side is already lowercase — it'll always come back "always uppercase" and we can short-circuit. Trivial deferred.
+
+  - **Race condition on rapid double-taps.** Two concurrent saves of the same word can both pass the Step 1 lookup before either has written, then both insert. Mitigation: rely on the DB unique index on `(user_id, target_word)` for non-polysemy entries, or serialise per-word in the application. With the planned PK move to auto-increment `id`, the constraint shifts; a UNIQUE INDEX on `(user_id, target_word, native_translation)` preserves the exact-pair guarantee.
+
+  - **Soft-lapse-on-relookup can over-punish cautious users.** If the user taps a word they actually know just to confirm a translation, the SRS stage drops by one. Mitigation: add a 5-minute cooldown — only count the lookup as a lapse if the same `(user_id, target_word)` hasn't been seen in the last N minutes. Avoids penalising re-reads of the same conversation bubble.
+
+  - **Data migration when shipping the new schema.** The existing `user_unknown_words` table has the composite PK `(user_id, word)`. The new schema needs an `id` PK with non-unique index on `(user_id, target_word)`, plus the joined `native_translation` string and the SRS columns. SQLite ALTER is limited; the migration is a full table rewrite (`CREATE TABLE _new` → `INSERT INTO _new SELECT FROM old` → `DROP old` → `ALTER RENAME`). Should be a one-shot script alongside the column additions.
+
+  - **Reverse-direction lookups are out of scope.** The system is one-way (target language → native). The user can't tap a German word and look up the Spanish equivalent. Probably fine — we're optimising for the "user is reading target-language content" flow.
+
+  - **LLM classification errors are unrecoverable without UI.** Step 3 (synonym vs polysemy) and the proper-noun check are LLM judgements and occasionally wrong. Without a "manage my vocabulary" UI, mis-classified entries can't be merged, split, or deleted. The vocab-mode UI should include basic CRUD over entries.
 
 The dashboard becomes the new `/` route; current home becomes something like `/conversation`.
 
