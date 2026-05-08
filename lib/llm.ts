@@ -67,11 +67,49 @@ interface Usage {
   total_tokens?: number;
 }
 
+/**
+ * Log gating:
+ *  - LLM_LOG=1 forces logging on (dev or prod).
+ *  - LLM_LOG=0 forces logging off.
+ *  - Unset: on in dev, off in prod.
+ */
+function shouldLog(): boolean {
+  const flag = process.env.LLM_LOG;
+  if (flag === "1") return true;
+  if (flag === "0") return false;
+  return process.env.NODE_ENV !== "production";
+}
+
 function logUsage(label: string, model: string, usage: Usage | undefined): void {
-  if (!usage) return;
+  if (!shouldLog() || !usage) return;
   console.log(
     `[llm] ${label} model=${model} prompt=${usage.prompt_tokens ?? "?"} completion=${usage.completion_tokens ?? "?"} total=${usage.total_tokens ?? "?"}`,
   );
+}
+
+/**
+ * Audio APIs (Whisper, TTS) don't return token usage. Log the size signals
+ * we have so cost telemetry exists for those routes too — OpenAI bills
+ * Whisper by audio duration (≈ input bytes for a fixed codec) and TTS by
+ * input character count. Caller passes whichever signals it has.
+ */
+export function logAudioUsage(
+  label: string,
+  model: string,
+  signals: {
+    inputBytes?: number;
+    outputBytes?: number;
+    inputChars?: number;
+    outputChars?: number;
+  },
+): void {
+  if (!shouldLog()) return;
+  const parts = [`[llm] ${label} model=${model}`];
+  if (signals.inputBytes !== undefined) parts.push(`inputBytes=${signals.inputBytes}`);
+  if (signals.inputChars !== undefined) parts.push(`inputChars=${signals.inputChars}`);
+  if (signals.outputBytes !== undefined) parts.push(`outputBytes=${signals.outputBytes}`);
+  if (signals.outputChars !== undefined) parts.push(`outputChars=${signals.outputChars}`);
+  console.log(parts.join(" "));
 }
 
 /**

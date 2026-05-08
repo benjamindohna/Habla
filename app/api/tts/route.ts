@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOpenAI, TASK_MODELS } from "@/lib/llm";
+import { getOpenAI, TASK_MODELS, logAudioUsage } from "@/lib/llm";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
 
 export async function POST(req: NextRequest) {
@@ -27,6 +27,11 @@ export async function POST(req: NextRequest) {
     });
 
     const buffer = Buffer.from(await speech.arrayBuffer());
+
+    logAudioUsage("tts", TASK_MODELS.tts, {
+      inputChars: text.length,
+      outputBytes: buffer.length,
+    });
 
     return new NextResponse(buffer, {
       headers: {

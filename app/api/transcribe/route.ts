@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { toFile } from "openai";
-import { getOpenAI, TASK_MODELS } from "@/lib/llm";
+import { getOpenAI, TASK_MODELS, logAudioUsage } from "@/lib/llm";
 import { DEFAULT_TARGET } from "@/lib/targetLanguage";
 
 export async function POST(req: NextRequest) {
@@ -15,11 +15,9 @@ export async function POST(req: NextRequest) {
 
     const arrayBuffer = await audioBlob.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    console.log("[/api/transcribe] blob size:", buffer.length, "type:", audioBlob.type, "nativeLanguage:", nativeLanguage);
 
     // Prompt tells Whisper to expect mixed target + native language so it
     // doesn't force-map native-language words into target-language phonetics.
-    // temperature: 0 suppresses hallucinated filler phrases.
     const targetName = DEFAULT_TARGET.language;
     const transcription = await getOpenAI().audio.transcriptions.create({
       file: await toFile(buffer, "audio.webm", { type: audioBlob.type || "audio/webm" }),
@@ -27,7 +25,11 @@ export async function POST(req: NextRequest) {
       prompt: `The speaker is learning ${targetName} and may mix in ${nativeLanguage} words they don't know in ${targetName} yet. Transcribe exactly what is said, preserving both ${targetName} and ${nativeLanguage} words as spoken. Always write numbers as words, never as digits.`,
     });
 
-    console.log("[/api/transcribe] transcript:", JSON.stringify(transcription.text));
+    logAudioUsage("transcribe", TASK_MODELS.transcription, {
+      inputBytes: buffer.length,
+      outputChars: transcription.text.length,
+    });
+
     return NextResponse.json({ transcript: transcription.text });
   } catch (err) {
     console.error("[/api/transcribe]", err);
