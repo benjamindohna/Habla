@@ -38,7 +38,7 @@ type GenStatus =
 
 type LookupState =
   | { kind: "loading" }
-  | { kind: "done"; segment: string; translation: string }
+  | { kind: "done"; segment: string; translation: string; indices: number[] }
   | { kind: "error"; message: string };
 
 // ── Page ─────────────────────────────────────────────────────────────────
@@ -111,16 +111,24 @@ export default function OnTapPlaygroundPage() {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error || `HTTP ${res.status}`);
         }
-        return res.json() as Promise<{ segment: string; translation: string }>;
+        return res.json() as Promise<{
+          segment: string;
+          translation: string;
+          indices: number[];
+        }>;
       })
       .then((data) => {
+        const result: LookupState = {
+          kind: "done",
+          segment: data.segment,
+          translation: data.translation,
+          indices: data.indices,
+        };
+        // Populate the cache under every covered index so a later tap on
+        // any related word returns the same answer without a fresh call.
         setLookups((prev) => {
           const next = new Map(prev);
-          next.set(token.wordIndex, {
-            kind: "done",
-            segment: data.segment,
-            translation: data.translation,
-          });
+          for (const idx of data.indices) next.set(idx, result);
           return next;
         });
       })

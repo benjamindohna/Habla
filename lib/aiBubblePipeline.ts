@@ -208,9 +208,29 @@ function markWordOccurrence(sentence: string, wordIndex: number): string {
   });
 }
 
+/**
+ * Extract just the words (no punctuation, no whitespace) using the same
+ * regex as the client. Index N here refers to the same word as wordIndex N
+ * on the client side.
+ */
+function tokenizeWords(sentence: string): string[] {
+  const re = new RegExp(WORD_REGEX.source, WORD_REGEX.flags);
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(sentence)) !== null) {
+    out.push(m[0]);
+  }
+  return out;
+}
+
 export interface WordLookupResult {
   segment: string;
   translation: string;
+  /** 0-indexed positions of the words that constitute this segment. The
+   *  tapped word's index is always included. Used by the client to cache
+   *  the result under every covered index, so subsequent taps on related
+   *  words return the same answer instantly without a fresh LLM call. */
+  indices: number[];
 }
 
 export async function translateWordInContext(args: {
@@ -222,6 +242,8 @@ export async function translateWordInContext(args: {
   const target = describeTargetLanguage(DEFAULT_TARGET);
   const targetName = DEFAULT_TARGET.language;
   const marked = markWordOccurrence(args.sentence, args.wordIndex);
+  const words = tokenizeWords(args.sentence);
+  const indexedWordList = words.map((w, i) => `  [${i}] ${w}`).join("\n");
 
   const prompt = `You are a translation assistant for a language learner studying ${target}. Their native language is ${args.nativeLanguage}.
 
@@ -271,20 +293,35 @@ Worked examples (target Spanish, native German):
 - Tapped "Estados" in "Estados Unidos"
   Segment: "Estados Unidos" → Translation: "Vereinigte Staaten"
 
+TASK 3 — RETURN THE WORD INDICES OF THE SEGMENT
+The sentence is also given as an indexed word list below. Return the indices of all words that constitute the segment (so the client can cache the result under every covered index — tapping any of them later shows the same answer without another call).
+
+- The tapped word's index MUST be included in the indices array.
+- Indices need NOT be contiguous — if the segment skips intermediate words, that's fine. Use exactly the words that belong to the segment.
+- Use the indices as listed below. Do not invent new ones.
+
 Sentence: "${args.sentence}"
 Sentence with tapped word marked: "${marked}"
-Tapped word: "${args.word}"
+Tapped word: "${args.word}" (index ${args.wordIndex})
+
+Words by index:
+${indexedWordList}
 
 Return ONLY valid JSON:
 {
   "segment": "<the target-language segment, exact form from the sentence>",
-  "translation": "<the standalone ${args.nativeLanguage} translation, vocab-card style, contextually correct meaning>"
+  "translation": "<the standalone ${args.nativeLanguage} translation, vocab-card style, contextually correct meaning>",
+  "indices": [<int>, <int>, ...]
 }`;
 
   // chat_precise (gpt-4o) for the segment + translate combo: compound-tense
   // detection needs grammatical lookahead (auxiliary → participle) that mini
   // does not do reliably. See "te haya" / "du hat" miscut for the symptom.
-  const parsed = await chatJSON<{ segment?: unknown; translation?: unknown }>({
+  const parsed = await chatJSON<{
+    segment?: unknown;
+    translation?: unknown;
+    indices?: unknown;
+  }>({
     task: "chat_precise",
     label: "playground/translateWord",
     systemPrompt: prompt,
@@ -298,5 +335,20 @@ Return ONLY valid JSON:
   const translation =
     typeof parsed.translation === "string" ? parsed.translation.trim() : "";
 
-  return { segment, translation };
+  // Validate indices: in-bounds, unique, must include the tapped word.
+  // Falls back to [wordIndex] if the model returns garbage. We deliberately
+  // do NOT check contiguity — segments may skip intermediate words.
+  let indices: number[] = Array.isArray(parsed.indices)
+    ? (parsed.indices as unknown[])
+        .filter(
+          (n): n is number =>
+            typeof n === "number" && Number.isInteger(n) && n >= 0 && n < words.length,
+        )
+    : [];
+  indices = Array.from(new Set(indices)).sort((a, b) => a - b);
+  if (!indices.includes(args.wordIndex)) {
+    indices = [args.wordIndex];
+  }
+
+  return { segment, translation, indices };
 }
