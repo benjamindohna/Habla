@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { chatJSON } from "@/lib/llm";
 import type { Pair } from "@/types/correction";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function buildPrompt(nativeLanguage: string, localVersionEs: string, transcript: string): string {
   const target = describeTargetLanguage(DEFAULT_TARGET);
@@ -181,17 +179,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing transcript or local version" }, { status: 400 });
     }
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "user", content: buildPrompt(nativeLanguage, localVersionEs, transcript) },
-      ],
-      temperature: 0.2,
+    const { pairs } = await chatJSON<{ pairs: Pair[] }>({
+      task: "chat_precise",
+      label: "segment",
+      userPrompt: buildPrompt(nativeLanguage, localVersionEs, transcript),
     });
-
-    const raw = completion.choices[0].message.content ?? "{}";
-    const { pairs } = JSON.parse(raw) as { pairs: Pair[] };
     const normalized = normalizePairs(pairs);
     warnIfCoverageBroken(normalized, transcript, localVersionEs);
     return NextResponse.json({ pairs: normalized });

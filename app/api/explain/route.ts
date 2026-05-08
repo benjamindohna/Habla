@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { chatText } from "@/lib/llm";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function buildPrompt(
   localVersionEs: string,
@@ -44,19 +42,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "user",
-          content: buildPrompt(localVersionEs, localSegment, userSegment, nativeLanguage),
-        },
-      ],
+    const explanation = await chatText({
+      task: "chat_precise",
+      label: "explain",
+      userPrompt: buildPrompt(localVersionEs, localSegment, userSegment, nativeLanguage),
       temperature: 0.4,
-      max_tokens: 250,
+      maxTokens: 250,
     });
-
-    const explanation = completion.choices[0].message.content?.trim() ?? "";
     return NextResponse.json({ explanation });
   } catch (err) {
     console.error("[/api/explain]", err);

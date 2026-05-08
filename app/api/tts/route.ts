@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { getOpenAI, TASK_MODELS } from "@/lib/llm";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,8 +10,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
 
-    const speech = await openai.audio.speech.create({
-      model: "gpt-4o-mini-tts",
+    const speech = await getOpenAI().audio.speech.create({
+      model: TASK_MODELS.tts,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       voice: "marin" as any,
       input: text,

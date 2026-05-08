@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { chatJSON } from "./llm";
 import { getDb } from "./db";
 import { getUserById } from "./users";
 import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
@@ -13,8 +13,6 @@ interface InterestRow {
   interest: string;
   is_recent: number;
 }
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function buildPrompt(args: {
   nativeLanguage: string;
@@ -98,16 +96,11 @@ export async function generateTopicsForUser(
     exclude,
   });
 
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    response_format: { type: "json_object" },
-    messages: [{ role: "system", content: prompt }],
+  const parsed = await chatJSON<{ topics?: unknown }>({
+    task: "chat_light",
+    label: "generateTopics",
+    systemPrompt: prompt,
   });
-
-  const raw = completion.choices[0]?.message?.content;
-  if (!raw) throw new Error("Empty response from model");
-
-  const parsed = JSON.parse(raw) as { topics?: unknown };
   const topics = Array.isArray(parsed.topics) ? (parsed.topics as Topic[]) : [];
 
   const valid = topics.filter(

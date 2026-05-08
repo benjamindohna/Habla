@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { chatJSON } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
 import { appendMessage, createConversation, type Segment } from "@/lib/conversations";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -52,15 +50,12 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [{ role: "system", content: prompt }],
+    const parsed = await chatJSON<{ text?: unknown; segments?: unknown }>({
+      task: "chat_light",
+      label: "converse/start",
+      systemPrompt: prompt,
       temperature: 0.7,
     });
-
-    const raw = completion.choices[0].message.content ?? "{}";
-    const parsed = JSON.parse(raw) as { text?: unknown; segments?: unknown };
     if (typeof parsed.text !== "string" || !parsed.text.trim()) {
       throw new Error("Model returned no usable opener");
     }

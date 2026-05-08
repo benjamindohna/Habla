@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { chatJSON } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
 import { getUserById, getUserInterests, setUserInterests, setUserInterestsText } from "@/lib/users";
 import { getConversation, getMessages, markConversationEnded } from "@/lib/conversations";
 import { generateAndStoreNext, invalidateNextSet } from "@/lib/topicSets";
 import { getDb } from "@/lib/db";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const MAX_TAGS = 12;
 const RECENT_TAGS = 5;
@@ -78,18 +76,12 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [{ role: "system", content: prompt }],
+    const parsed = await chatJSON<{ narrative?: unknown; tags?: unknown }>({
+      task: "chat_light",
+      label: "conversations/extract",
+      systemPrompt: prompt,
       temperature: 0.3,
     });
-
-    const raw = completion.choices[0].message.content ?? "{}";
-    const parsed = JSON.parse(raw) as {
-      narrative?: unknown;
-      tags?: unknown;
-    };
 
     const narrative = typeof parsed.narrative === "string" ? parsed.narrative.trim() : null;
     const tags = Array.isArray(parsed.tags)

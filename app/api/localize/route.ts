@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { chatJSON } from "@/lib/llm";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 type Style = "natural" | "transcript_aware";
 
@@ -76,18 +74,15 @@ export async function POST(req: NextRequest) {
       ? `TRANSCRIPT: "${transcript!.trim()}"\nINTENT: "${intendedMeaning}"`
       : intendedMeaning;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      response_format: { type: "json_object" },
+    const result = await chatJSON({
+      task: "chat_precise",
+      label: "localize",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent },
       ],
-      temperature: 0.2,
     });
-
-    const raw = completion.choices[0].message.content ?? "{}";
-    return NextResponse.json(JSON.parse(raw));
+    return NextResponse.json(result);
   } catch (err) {
     console.error("[/api/localize]", err);
     return NextResponse.json({ error: "Localization failed" }, { status: 500 });

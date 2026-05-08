@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { chatJSON, type ChatMessage } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
@@ -10,8 +10,6 @@ import {
   type Segment,
 } from "@/lib/conversations";
 import type { Pair } from "@/types/correction";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -89,7 +87,7 @@ Return ONLY valid JSON:
 }`;
 
   // Build message array: system + alternating turns from history.
-  const messages: { role: "system" | "assistant" | "user"; content: string }[] = [
+  const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
   ];
   for (const m of history) {
@@ -100,15 +98,12 @@ Return ONLY valid JSON:
   }
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
+    const parsed = await chatJSON<{ text?: unknown; segments?: unknown }>({
+      task: "chat_light",
+      label: "converse/turn",
       messages,
       temperature: 0.7,
     });
-
-    const raw = completion.choices[0].message.content ?? "{}";
-    const parsed = JSON.parse(raw) as { text?: unknown; segments?: unknown };
     if (typeof parsed.text !== "string" || !parsed.text.trim()) {
       throw new Error("Model returned no usable reply");
     }
