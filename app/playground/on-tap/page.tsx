@@ -262,12 +262,18 @@ function WordButton({
       >
         {token.text}
       </button>
-      {open && <Popover lookup={lookup} />}
+      {open && <Popover lookup={lookup} tappedWord={token.text} />}
     </span>
   );
 }
 
-function Popover({ lookup }: { lookup: LookupState | undefined }) {
+function Popover({
+  lookup,
+  tappedWord,
+}: {
+  lookup: LookupState | undefined;
+  tappedWord: string;
+}) {
   return (
     <span
       role="tooltip"
@@ -282,9 +288,9 @@ function Popover({ lookup }: { lookup: LookupState | undefined }) {
         <span className="text-red-300">{lookup.message}</span>
       ) : (
         <span className="block text-left leading-snug space-y-2">
-          <ResultRow label="gpt-4o" tone="bright" result={lookup.precise} />
+          <ResultRow label="gpt-4o" tone="bright" result={lookup.precise} tappedWord={tappedWord} />
           <span className="block border-t border-white/10" />
-          <ResultRow label="gpt-4o-mini" tone="dim" result={lookup.light} />
+          <ResultRow label="gpt-4o-mini" tone="dim" result={lookup.light} tappedWord={tappedWord} />
         </span>
       )}
       <span
@@ -299,19 +305,26 @@ function ResultRow({
   label,
   tone,
   result,
+  tappedWord,
 }: {
   label: string;
   tone: "bright" | "dim";
   result: ModelResult;
+  tappedWord: string;
 }) {
   const labelColor = tone === "bright" ? "text-emerald-300" : "text-sky-300";
+  // Show the segment only when the model actually grouped it differently
+  // from what the user tapped. Compare normalised forms so a stray
+  // whitespace or casing flip in the model output doesn't fool the check.
+  const norm = (s: string) => s.trim().toLowerCase();
+  const segmentDiffersFromTap = norm(result.segment) !== norm(tappedWord);
   return (
     <span className="block">
       <span className={`block text-[10px] uppercase tracking-wide ${labelColor}`}>
         {label} · {result.ms}ms
       </span>
       <span className="block whitespace-normal">{result.translation}</span>
-      {result.segment.includes(" ") && (
+      {segmentDiffersFromTap && (
         <span className="block text-[10px] text-white/60 mt-0.5 whitespace-normal">
           {result.segment}
         </span>
