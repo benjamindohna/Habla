@@ -5,7 +5,7 @@ import AudioRecorder from "./AudioRecorder";
 import AIBubble from "./AIBubble";
 import type { Segment } from "@/types/segment";
 import UserBubble from "./UserBubble";
-import type { CorrectionResult, Pair } from "@/types/correction";
+import type { CorrectionResult } from "@/types/correction";
 
 type CorrectionStyle = "natural" | "transcript_aware";
 
@@ -38,48 +38,19 @@ async function transcribeAudio(blob: Blob, nativeLanguage: string): Promise<stri
   return transcript as string;
 }
 
-async function interpretTranscript(
-  transcript: string,
-  nativeLanguage: string,
-): Promise<{ intended_meaning_native: string; confidence: string; notes_native: string }> {
-  const res = await fetch("/api/interpret", {
+async function correctTranscript(args: {
+  transcript: string;
+  overrideIntendedMeaning?: string;
+  nativeLanguage: string;
+  style: CorrectionStyle;
+}): Promise<CorrectionResult> {
+  const res = await fetch("/api/correct", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ transcript, nativeLanguage }),
+    body: JSON.stringify(args),
   });
-  if (!res.ok) throw new Error("Interpretation failed");
+  if (!res.ok) throw new Error("Correction failed");
   return res.json();
-}
-
-async function localizeInterpretation(
-  intendedMeaning: string,
-  transcript: string,
-  nativeLanguage: string,
-  style: CorrectionStyle,
-): Promise<string> {
-  const res = await fetch("/api/localize", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ intendedMeaning, transcript, nativeLanguage, style }),
-  });
-  if (!res.ok) throw new Error("Localization failed");
-  const { local_version_es } = await res.json();
-  return local_version_es as string;
-}
-
-async function segmentSentences(
-  transcript: string,
-  localVersionEs: string,
-  nativeLanguage: string,
-): Promise<Pair[]> {
-  const res = await fetch("/api/segment", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ transcript, localVersionEs, nativeLanguage }),
-  });
-  if (!res.ok) throw new Error("Segmentation failed");
-  const { pairs } = await res.json();
-  return pairs;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -147,30 +118,13 @@ export default function ConversationView({
     transcript: string,
     overrideInterpretation?: string,
   ): Promise<CorrectionResult> {
-    setPending({ stage: "processing", step: "Interpreting…", transcript });
-    const interpretation = overrideInterpretation
-      ? { intended_meaning_native: overrideInterpretation, confidence: "high", notes_native: "" }
-      : await interpretTranscript(transcript, nativeLanguage);
-
-    setPending({ stage: "processing", step: "Translating to Spanish…", transcript });
-    const local_version_es = await localizeInterpretation(
-      interpretation.intended_meaning_native,
+    setPending({ stage: "processing", step: "Correcting…", transcript });
+    return correctTranscript({
       transcript,
+      overrideIntendedMeaning: overrideInterpretation,
       nativeLanguage,
-      correctionStyle,
-    );
-
-    setPending({ stage: "processing", step: "Comparing versions…", transcript });
-    const pairs = await segmentSentences(transcript, local_version_es, nativeLanguage);
-
-    return {
-      transcript_raw: transcript,
-      intended_meaning_native: interpretation.intended_meaning_native,
-      local_version_es,
-      confidence: interpretation.confidence as CorrectionResult["confidence"],
-      notes_native: interpretation.notes_native,
-      pairs,
-    };
+      style: correctionStyle,
+    });
   }
 
   async function handleRecordingComplete(blob: Blob) {

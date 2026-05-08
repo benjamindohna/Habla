@@ -1,9 +1,130 @@
-import { NextRequest, NextResponse } from "next/server";
-import { chatJSON } from "@/lib/llm";
-import type { Pair } from "@/types/correction";
-import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
+// The three LLM steps that turn a learner's raw transcript into a structured
+// CorrectionResult: interpret → localize → segment. Lifted out of the
+// individual API routes so they can be composed in /api/correct without an
+// extra HTTP hop. Each function is self-contained: same input shape +
+// nativeLanguage/style produces the same output.
 
-function buildPrompt(nativeLanguage: string, localVersionEs: string, transcript: string): string {
+import { chatJSON } from "./llm";
+import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
+import type { Pair } from "@/types/correction";
+
+export type CorrectionStyle = "natural" | "transcript_aware";
+
+export interface Interpretation {
+  intended_meaning_native: string;
+  confidence: "high" | "medium" | "low";
+  notes_native: string;
+}
+
+// ── interpret ────────────────────────────────────────────────────────────
+
+export async function interpret(
+  transcript: string,
+  nativeLanguage: string,
+): Promise<Interpretation> {
+  const targetName = DEFAULT_TARGET.language;
+  const systemPrompt = `You are a bilingual interpretation assistant. A language learner is trying to speak ${targetName} but may mix in their native language (${nativeLanguage}) and may have grammar mistakes or unnatural phrasing.
+
+Read the transcript and output what the person most likely intended to say, in ${nativeLanguage}. Do not produce ${targetName} output.
+
+CRITICAL — coverage:
+- Capture the COMPLETE intent. Every clause, every idea the learner attempted to express must appear in your output, in the order they said it.
+- Do NOT summarise, condense, drop redundant tags, or "clean up" the learner's intent. If they said something at the end (like "I think it's true"), include it. If they said something twice, reflect that.
+- Use multiple sentences when the learner spoke in multiple clauses — do NOT force everything into one sentence.
+
+Return ONLY valid JSON:
+{
+  "intended_meaning_native": "string",
+  "confidence": "high | medium | low",
+  "notes_native": "string"
+}
+
+- intended_meaning_native: a faithful ${nativeLanguage} version of the learner's complete intent. One or more sentences as needed.
+- confidence: your confidence in the interpretation.
+- notes_native: one short note in ${nativeLanguage} if uncertain; otherwise a brief summary of what the learner was expressing.`;
+
+  return chatJSON<Interpretation>({
+    task: "chat_light",
+    label: "interpret",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: transcript },
+    ],
+  });
+}
+
+// ── localize ─────────────────────────────────────────────────────────────
+
+function naturalPrompt(nativeLanguage: string): string {
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+  const targetName = DEFAULT_TARGET.language;
+  return `You are a native ${targetName} speaker. Your job is to express the given meaning in natural, ${target} as it would be spoken in casual conversation.
+
+Rules:
+- Match the variety: ${target}. Vocabulary, idioms, named entities, and register must fit this variety. Do not drift to other regions or registers.
+- Preserve EVERY clause from the meaning, even short tags or seemingly redundant phrases. Use multiple sentences if needed.
+- The output is in ${targetName}. The input meaning is in ${nativeLanguage}.
+- Always write numbers as words, never as digits.
+- End with appropriate punctuation.
+
+Return ONLY valid JSON:
+{ "local_version_es": "string" }`;
+}
+
+function transcriptAwarePrompt(nativeLanguage: string): string {
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+  const targetName = DEFAULT_TARGET.language;
+  return `You are a ${targetName}-language correction engine for a learner.
+
+You receive two inputs:
+- TRANSCRIPT: what the learner actually said. May mix ${targetName} and ${nativeLanguage}, may have grammar errors or unnatural phrasing.
+- INTENT: what they meant to say, expressed in ${nativeLanguage}.
+
+Your job: produce one ${target} sentence (or sentences, if the learner spoke in multiple clauses) that captures the INTENT and that the learner can use as a corrected reference.
+
+CRITICAL: Stay as close to the TRANSCRIPT as possible.
+- Where the TRANSCRIPT is already correct, natural ${target}, KEEP THE LEARNER'S EXACT WORDS. Do not rewrite correct ${targetName} into synonyms or rearrange word order for stylistic reasons.
+- Only change parts that are wrong, unnatural, in ${nativeLanguage}, or in the wrong ${targetName} variety.
+- The goal is a corrected version, not a rewritten version. If the learner's phrasing is acceptable for ${target}, leave it alone.
+
+Other rules:
+- Match the variety: ${target}. Replace vocabulary or idioms from other regions/registers with their ${target} equivalents.
+- Preserve EVERY clause from INTENT. If the learner said multiple clauses (even seemingly redundant ones, like a softener at the end), include all of them.
+- Always write numbers as words, never as digits.
+- End with appropriate punctuation.
+
+Return ONLY valid JSON:
+{ "local_version_es": "string" }`;
+}
+
+export async function localize(args: {
+  intendedMeaning: string;
+  transcript?: string;
+  nativeLanguage: string;
+  style: CorrectionStyle;
+}): Promise<string> {
+  const useTranscript = args.style === "transcript_aware" && args.transcript?.trim();
+  const systemPrompt = useTranscript
+    ? transcriptAwarePrompt(args.nativeLanguage)
+    : naturalPrompt(args.nativeLanguage);
+  const userContent = useTranscript
+    ? `TRANSCRIPT: "${args.transcript!.trim()}"\nINTENT: "${args.intendedMeaning}"`
+    : args.intendedMeaning;
+
+  const result = await chatJSON<{ local_version_es?: string }>({
+    task: "chat_precise",
+    label: "localize",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ],
+  });
+  return (result.local_version_es ?? "").trim();
+}
+
+// ── segment ──────────────────────────────────────────────────────────────
+
+function segmentPrompt(nativeLanguage: string, localVersionEs: string, transcript: string): string {
   const target = describeTargetLanguage(DEFAULT_TARGET);
   const targetName = DEFAULT_TARGET.language;
   return `You are a sentence-alignment engine for language learning.
@@ -91,20 +212,16 @@ Return ONLY valid JSON:
 }
 
 /**
- * Post-processing guard so punctuation quirks in the model output never
- * produce visible artefacts in the UI:
- *
- *  Pass 1 — absorb any standalone-punctuation pair (local_segment is only
- *            commas / colons / semicolons) into the preceding pair.
- *  Pass 2 — pairs that differ only by trailing punctuation are re-marked
- *            as matches, because the learner cannot be expected to say
- *            punctuation when speaking.
+ * Pass 1 — absorb any standalone-punctuation pair (local_segment is only
+ *           commas / colons / semicolons) into the preceding pair.
+ * Pass 2 — pairs that differ only by trailing punctuation are re-marked
+ *           as matches, because the learner cannot be expected to say
+ *           punctuation when speaking.
  */
-function normalizePairs(pairs: Pair[]): Pair[] {
+export function normalizePairs(pairs: Pair[]): Pair[] {
   const isPuncOnly = (s: string) => /^[,;:]+$/.test(s.trim());
   const stripTrailing = (s: string) => s.trim().replace(/[,;:.!?¿¡]+$/, "").trimEnd();
 
-  // Pass 1: merge lone-punctuation segments into the preceding pair
   const merged: Pair[] = [];
   for (const pair of pairs) {
     if (isPuncOnly(pair.local_segment) && merged.length > 0) {
@@ -119,8 +236,7 @@ function normalizePairs(pairs: Pair[]): Pair[] {
     }
   }
 
-  // Pass 2: re-evaluate is_match when segments differ only by trailing punctuation
-  return merged.map(pair => {
+  return merged.map((pair) => {
     if (pair.is_match) return pair;
     const localCore = stripTrailing(pair.local_segment).toLowerCase();
     const userCore = stripTrailing(pair.user_segment).toLowerCase();
@@ -131,15 +247,6 @@ function normalizePairs(pairs: Pair[]): Pair[] {
   });
 }
 
-/**
- * Logs a warning when the pairs don't cover the original LEARNER / LOCAL
- * texts. Compares whitespace-collapsed, punctuation-stripped, lower-cased
- * forms — strict enough to catch dropped/duplicated words, loose enough to
- * ignore the punctuation/casing that the LLM is allowed to normalise.
- *
- * Doesn't fail the request — it's a metric to see how often the coverage
- * invariant breaks in practice. If the rate is non-trivial we add a retry.
- */
 function warnIfCoverageBroken(pairs: Pair[], transcript: string, localVersionEs: string) {
   const norm = (s: string) =>
     s
@@ -155,40 +262,29 @@ function warnIfCoverageBroken(pairs: Pair[], transcript: string, localVersionEs:
 
   if (joinedUser !== expectedUser) {
     console.warn(
-      "[/api/segment] coverage break (user):",
+      "[segment] coverage break (user):",
       JSON.stringify({ expected: expectedUser, got: joinedUser }),
     );
   }
   if (joinedLocal !== expectedLocal) {
     console.warn(
-      "[/api/segment] coverage break (local):",
+      "[segment] coverage break (local):",
       JSON.stringify({ expected: expectedLocal, got: joinedLocal }),
     );
   }
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const { transcript, localVersionEs, nativeLanguage = "German" } = (await req.json()) as {
-      transcript: string;
-      localVersionEs: string;
-      nativeLanguage?: string;
-    };
-
-    if (!transcript?.trim() || !localVersionEs?.trim()) {
-      return NextResponse.json({ error: "Missing transcript or local version" }, { status: 400 });
-    }
-
-    const { pairs } = await chatJSON<{ pairs: Pair[] }>({
-      task: "chat_precise",
-      label: "segment",
-      userPrompt: buildPrompt(nativeLanguage, localVersionEs, transcript),
-    });
-    const normalized = normalizePairs(pairs);
-    warnIfCoverageBroken(normalized, transcript, localVersionEs);
-    return NextResponse.json({ pairs: normalized });
-  } catch (err) {
-    console.error("[/api/segment]", err);
-    return NextResponse.json({ error: "Segmentation failed" }, { status: 500 });
-  }
+export async function segment(args: {
+  transcript: string;
+  localVersionEs: string;
+  nativeLanguage: string;
+}): Promise<Pair[]> {
+  const { pairs } = await chatJSON<{ pairs: Pair[] }>({
+    task: "chat_precise",
+    label: "segment",
+    userPrompt: segmentPrompt(args.nativeLanguage, args.localVersionEs, args.transcript),
+  });
+  const normalized = normalizePairs(pairs);
+  warnIfCoverageBroken(normalized, args.transcript, args.localVersionEs);
+  return normalized;
 }
