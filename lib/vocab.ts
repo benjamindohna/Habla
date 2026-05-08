@@ -258,6 +258,119 @@ Reply with exactly one character: 1, X, or 0. No explanation, no punctuation, no
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Vocab comparator — at save time, when the target_word_lower of the new
+// entry collides with one or more existing entries for this user, decide
+// whether the new entry is a synonym of one of them (→ discard the new
+// one) or a different sense (→ keep as a polyseme row).
+//
+// Cost: gpt-4o-mini, ~250 input + ~3 output tokens, ~$0.00005 per call.
+// Fires only on collision (most saves never reach it).
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface CompareDescriptionsArgs {
+  /** The target-language word (or multi-word segment) being saved. */
+  target_word: string;
+  /** The English sense-key of the NEW entry being considered. */
+  new_description: string;
+  /** English sense-keys of EXISTING entries for the same target_word_lower. */
+  existing_descriptions: string[];
+}
+
+/**
+ * Decide whether the new entry's description is a synonym of any of the
+ * existing descriptions.
+ *
+ * Returns:
+ *  - 0, 1, 2, ... — the 0-based index of the synonymous existing entry
+ *  - -1           — different sense than ALL existing entries (insert as new)
+ *
+ * Conservative parsing: if the model output doesn't contain a parseable
+ * integer in valid range, defaults to -1 (insert). False-positive
+ * duplicates are reparable via manual UI; silently dropping a genuine
+ * new sense is not.
+ */
+export async function compareVocabDescriptions(
+  args: CompareDescriptionsArgs,
+): Promise<number> {
+  if (args.existing_descriptions.length === 0) return -1;
+
+  const existingList = `[${args.existing_descriptions
+    .map((s) => `"${s}"`)
+    .join(", ")}]`;
+
+  const prompt = `You are deciding whether a new vocabulary entry is a synonym of any existing entry the learner has stored for the same target word.
+
+Inputs:
+- The target-language word (or phrase) being saved.
+- The English sense-key for the NEW entry.
+- A list of English sense-keys for EXISTING entries the learner already has stored under the same target word.
+
+For each existing entry, decide: does the NEW description and the EXISTING description describe the SAME meaning (synonyms, paraphrases, different ways of saying the same sense), or do they describe GENUINELY DIFFERENT senses of the same target word?
+
+Output a single integer:
+- 0, 1, 2, ...  the 0-based index of the existing entry the new entry is a synonym of
+- -1            the new entry describes a different sense than ALL existing entries
+
+If the new entry could plausibly be a synonym of more than one existing entry (which usually means the existing list itself has duplicates), pick the FIRST matching index.
+
+Examples:
+
+Word: "banco"
+New: "long bench to sit on"
+Existing: ["financial institution"]
+→ -1   (different senses)
+
+Word: "banco"
+New: "park bench / outdoor seat"
+Existing: ["long bench to sit on"]
+→ 0    (synonym — same sense, different phrasing)
+
+Word: "lluvia"
+New: "rainfall / precipitation"
+Existing: ["rainfall as weather"]
+→ 0    (synonym)
+
+Word: "hoja"
+New: "blade of a knife"
+Existing: ["leaf of a tree", "sheet of paper"]
+→ -1   (different from both)
+
+Word: "hoja"
+New: "leaf falling from a tree"
+Existing: ["leaf of a tree", "sheet of paper"]
+→ 0    (synonym of index 0)
+
+Word: "hoja"
+New: "page in a notebook"
+Existing: ["leaf of a tree", "sheet of paper"]
+→ 1    (synonym of index 1)
+
+Now decide.
+
+Word: "${args.target_word}"
+New: "${args.new_description}"
+Existing: ${existingList}
+
+Reply with a single integer (-1, 0, 1, 2, ...). No other text.`;
+
+  const raw = await chatText({
+    task: "chat_light",
+    label: "vocab/compare",
+    systemPrompt: prompt,
+    temperature: 0,
+    maxTokens: 5,
+  });
+
+  const match = raw.match(/-?\d+/);
+  if (!match) return -1; // unparseable → conservative default: insert as new
+  const verdict = parseInt(match[0], 10);
+  // Validate range. -1 means new; 0..N-1 indexes into existing.
+  if (verdict === -1) return -1;
+  if (verdict >= 0 && verdict < args.existing_descriptions.length) return verdict;
+  return -1; // out-of-range → conservative default
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // LEGACY — Phase A/B casing pipeline. See DISREGARDED_IDEAS.md.
 // Will be removed when the new save flow is wired; kept now so the
 // existing tests stay green.
