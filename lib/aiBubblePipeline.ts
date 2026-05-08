@@ -1,33 +1,33 @@
-// Two-call pipeline for AI-bubble text + tap-to-translate segments.
+// Pipeline helpers for AI-bubble text generation and tap-to-translate.
+// Two architectures live here side-by-side so we can compare them in the
+// playground without touching the production /api/converse/* routes.
 //
-// Replaces the single-prompt "generate text + segment + translate in one
-// shot" approach used today by /api/converse/start and /api/converse/turn.
-// The single prompt overloads the model and produces drift on segmentation
-// (compound tenses split, idioms broken up, isolated translations like
-// haya → "Habe").
+// Shared:
+//   generateAIOpener — produce only the AI's text. No segmentation, no
+//   translation. Cheap, single focus. Used by both architectures.
 //
-// New shape:
-//   Call A (generateAIOpener) — produce only the AI's text. Pure
-//   conversational generation, no segmentation rules competing with it.
+// Architecture 1 — upfront segment + align (one big Call B):
+//   segmentAndAlign — take the generated text, produce a full idiomatic
+//   native translation, then segment the target text and align each
+//   segment to a fragment of that translation.
+//   generateAndSegmentOpener — orchestrator: generateAIOpener → segmentAndAlign.
+//   Pros: instant tap (everything pre-translated). Cons: every word's
+//   translation generated whether tapped or not; one heavy prompt mixing
+//   tasks.
 //
-//   Call B (segmentAndAlign) — take the generated text, produce a full
-//   idiomatic native translation, then segment the target text and align
-//   each segment to a piece of that translation. Because every native
-//   fragment is anchored in a real grammatical sentence, isolated bad
-//   translations disappear: haya impresionado naturally maps to
-//   "beeindruckt hat" (compound), not "Habe + impressed".
+// Architecture 2 — on-tap, per-word translate (lazy):
+//   translateWordInContext — fired only when the user taps a specific
+//   word. Inputs: full sentence + tapped word (occurrence marked).
+//   Outputs: the contextual segment (word alone, or multi-word unit if
+//   it belongs to one) plus the contextually-correct native translation.
+//   Pros: only translate what's actually looked up; each call laser-focused.
+//   Cons: ~1-2s latency per first tap on a word.
 
 import { chatJSON, chatText } from "./llm";
 import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
 import type { Segment } from "@/types/segment";
 
-export interface AIBubblePipelineResult {
-  text: string;
-  native_translation: string;
-  segments: Segment[];
-}
-
-// ── Call A — text only ───────────────────────────────────────────────────
+// ── Shared: Call A — text only ───────────────────────────────────────────
 
 export async function generateAIOpener(args: {
   topic: string;
@@ -55,13 +55,21 @@ Return ONLY the message text in ${targetName}. No JSON, no quotes, no preamble, 
 
   return chatText({
     task: "chat_light",
-    label: "playground/openerA",
+    label: "playground/messageA",
     systemPrompt: prompt,
     temperature: 0.7,
   });
 }
 
-// ── Call B — translate, segment, align ───────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Architecture 1 — upfront segment + align
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface AIBubblePipelineResult {
+  text: string;
+  native_translation: string;
+  segments: Segment[];
+}
 
 export async function segmentAndAlign(args: {
   text: string;
@@ -161,8 +169,6 @@ Return ONLY valid JSON:
   return { native_translation, segments };
 }
 
-// ── Orchestrator — call A then B ─────────────────────────────────────────
-
 export async function generateAndSegmentOpener(args: {
   topic: string;
   level: number;
@@ -174,4 +180,94 @@ export async function generateAndSegmentOpener(args: {
     nativeLanguage: args.nativeLanguage,
   });
   return { text, native_translation, segments };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Architecture 2 — on-tap per-word translate
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Word regex. Matches a run of Unicode letters (with optional internal
+ * combining marks, apostrophe, hyphen). Stable across client and server
+ * so a wordIndex computed in the browser refers to the same occurrence
+ * the server marks in the prompt.
+ */
+export const WORD_REGEX = /[\p{L}][\p{L}\p{M}'-]*/gu;
+
+/**
+ * Wrap the wordIndex-th word match in the sentence with markers. Used to
+ * disambiguate repeated words (e.g. "el libro y el cuaderno" — which
+ * "el" did the learner tap?).
+ */
+function markWordOccurrence(sentence: string, wordIndex: number): string {
+  let i = 0;
+  const re = new RegExp(WORD_REGEX.source, WORD_REGEX.flags);
+  return sentence.replace(re, (match) => {
+    if (i++ === wordIndex) return `«${match}»`;
+    return match;
+  });
+}
+
+export interface WordLookupResult {
+  segment: string;
+  translation: string;
+}
+
+export async function translateWordInContext(args: {
+  sentence: string;
+  word: string;
+  wordIndex: number;
+  nativeLanguage: string;
+}): Promise<WordLookupResult> {
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+  const targetName = DEFAULT_TARGET.language;
+  const marked = markWordOccurrence(args.sentence, args.wordIndex);
+
+  const prompt = `You are a translation assistant for a language learner studying ${target}. Their native language is ${args.nativeLanguage}.
+
+The learner has tapped a single word in a ${targetName} sentence because they don't understand it. The tapped word is wrapped in «guillemets» so you know exactly which occurrence they mean (it may appear multiple times in the sentence).
+
+TASK 1 — DECIDE THE SEGMENT
+Decide whether the tapped word stands ALONE or belongs to a multi-word unit. Group it with neighbouring words when:
+- The word is an article ("el", "la", "los", "las", "un", "una", "unos", "unas") and a noun follows → segment = article + noun ("el libro").
+- The word is part of a COMPOUND TENSE: haber + past participle (he visto, había dicho, haya impresionado), estar + gerund (está hablando), ir a + infinitive (voy a hacer), modal periphrases (tener que ir, hay que hacerlo). → segment = the whole construction.
+- The word is part of an IDIOM or fixed expression (tener ganas, darse cuenta, echar de menos, por ejemplo, en cambio, sin embargo). → segment = the whole expression.
+- The word is part of a MULTI-WORD NAMED ENTITY (Estados Unidos, Real Madrid, América Latina). → segment = the whole name.
+Otherwise: segment = just the tapped word.
+
+The segment MUST contain the tapped word and MUST be a contiguous substring of the original sentence (in its original casing and form).
+
+TASK 2 — TRANSLATE
+Translate the segment into ${args.nativeLanguage}, choosing the meaning that fits THIS specific sentence's context. Many words have multiple meanings — pick the contextually correct one (e.g. "banco" can be bench or bank; "fuego" can be fire or passion). The translation should make sense to the learner when they see it isolated next to the segment.
+
+Use the SAME grammatical form as in the sentence — do NOT lemmatise. Examples:
+- "comió" → translate as the past-tense form ("aß" in German), not the infinitive
+- "haya impresionado" → "beeindruckt hat", not "beeindrucken"
+- "diseños" → "Designs" (plural), not "Design"
+
+Sentence: "${args.sentence}"
+Sentence with tapped word marked: "${marked}"
+Tapped word: "${args.word}"
+
+Return ONLY valid JSON:
+{
+  "segment": "<the segment containing the tapped word>",
+  "translation": "<contextually-correct ${args.nativeLanguage} translation, same grammatical form>"
+}`;
+
+  const parsed = await chatJSON<{ segment?: unknown; translation?: unknown }>({
+    task: "chat_light",
+    label: "playground/translateWord",
+    systemPrompt: prompt,
+    temperature: 0.2,
+  });
+
+  const segment =
+    typeof parsed.segment === "string" && parsed.segment.trim()
+      ? parsed.segment.trim()
+      : args.word;
+  const translation =
+    typeof parsed.translation === "string" ? parsed.translation.trim() : "";
+
+  return { segment, translation };
 }
