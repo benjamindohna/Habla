@@ -129,6 +129,8 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
   ```
   Steps: Unicode NFC composition (so `é` is one code-point, never `e + ◌́`), trim, strip leading/trailing punctuation (Unicode-aware via `\p{P}` — handles `¿`, `¡`, `«`, `»`), collapse internal whitespace. Casing handled separately via the filter below.
 
+  **Order of operations matters.** The very first canonicalisation pass MUST be called with `caseSensitive: true` so the original casing survives into the casing filter. If the default (lowercased) version runs first, every word will look lowercase and the filter has nothing to inspect — the proper-noun branch becomes unreachable. Only after the casing filter has decided per side is `toLowerCase()` applied (to the sides flagged as "incidental" or via the all-lowercase fast path).
+
   **Diacritics are NEVER stripped.** `si` (if) and `sí` (yes) are different words; `lodash.deburr` and similar are forbidden.
 
   **Lemmatisation is NEVER applied.** Surface form is preserved per the storage rule (`comió` stays `comió`, not collapsed to `comer`).
