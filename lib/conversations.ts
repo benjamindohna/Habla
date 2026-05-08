@@ -2,8 +2,6 @@ import { getDb } from "./db";
 import type { Pair } from "@/types/correction";
 import type { Segment } from "@/types/segment";
 
-export type { Segment };
-
 export type MessageRole = "ai" | "user";
 
 export interface ConversationRow {
@@ -26,8 +24,8 @@ export interface MessageRow {
 
 /**
  * Note: `segments_json` is overloaded by role.
- *  - role='user': the Pair[] alignment from /api/segment (correction view).
- *  - role='ai':   the Segment[] from the converse generation (tap-to-translate).
+ *  - role='user': the Pair[] alignment produced by /api/correct.
+ *  - role='ai':   the Segment[] from /api/converse/* (tap-to-translate).
  * Same column, same JSON storage, different shape per role.
  */
 export interface Message {

@@ -3,7 +3,8 @@ import { chatJSON } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
-import { appendMessage, createConversation, type Segment } from "@/lib/conversations";
+import { appendMessage, createConversation } from "@/lib/conversations";
+import type { Segment } from "@/types/segment";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();

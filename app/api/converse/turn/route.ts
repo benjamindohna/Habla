@@ -7,9 +7,9 @@ import {
   appendMessage,
   getConversation,
   getMessages,
-  type Segment,
 } from "@/lib/conversations";
 import type { Pair } from "@/types/correction";
+import type { Segment } from "@/types/segment";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
