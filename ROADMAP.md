@@ -184,7 +184,7 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
 
   ### Save logic — synonyms vs. polysemy
 
-  When a user taps a word in an AI bubble, the client sends `(target_word, native_translation, context)` to the backend. The backend then runs:
+  When a user taps a word in an AI bubble, the client sends `(target_word, native_translation)` to the backend. (Context is **not stored** — the acquisition moment, when the user reads the surrounding sentence in the bubble, is what counts pedagogically; review later doesn't need it. The polysemy classification in Step 3 below works fine on translations alone.) The backend then runs:
 
   ```
   Step 1 — Exact pair already exists?
@@ -202,8 +202,8 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
       YES → Step 3 (LLM call).
 
   Step 3 — LLM classification (one call):
-    Inputs: existing entry (target_word, native_translation, context),
-            new attempt (target_word, native_translation_new, context_new).
+    Inputs: existing entry (target_word, native_translation),
+            new attempt (target_word, native_translation_new).
     Question: are the two native translations essentially synonyms (same
               meaning, just different wording, like Regen / Niederschlag), or
               are they genuinely different meanings of the same target word
@@ -212,9 +212,9 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
       SYNONYMS  → Append the new native_translation to the existing entry's
                   translations list, e.g. "Regen / Niederschlag". Keep one row.
                   Stays in the existing entry's SRS stage.
-      DIFFERENT → New independent entry. Both rows have the same target_word,
-                  different context, different translation. SRS stage starts
-                  at 0 for the new entry.
+      DIFFERENT → New independent entry. Both rows share target_word but have
+                  different translations. SRS stage starts at 0 for the new
+                  entry.
   ```
 
   **Schema implications:**
