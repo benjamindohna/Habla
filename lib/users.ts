@@ -115,24 +115,19 @@ export function setUserCorrectionStyle(userId: number, style: CorrectionStyle): 
 }
 
 /**
- * Records a word/phrase the user looked up. Stores the surface form exactly
- * (lowercased, trimmed). On repeat lookups, increments looked_up and
- * refreshes last_seen — and fills native_translation if it was missing.
+ * Legacy no-op. The user_unknown_words table was dropped in migration
+ * 0002_vocab_v2. The new save flow lives at /api/me/vocab and handles
+ * description generation, dedup, and polysemy classification.
+ *
+ * This stub stays so that the production AIBubble's fire-and-forget
+ * POST to /api/me/words doesn't 500 — keeps the chat working during
+ * the transition. Phase B replaces the call site and removes both this
+ * function and the /api/me/words route.
  */
 export function recordLookedUpWord(
-  userId: number,
-  word: string,
-  nativeTranslation: string | null,
+  _userId: number,
+  _word: string,
+  _nativeTranslation: string | null,
 ): void {
-  const normalized = word.trim().toLowerCase();
-  if (!normalized) return;
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO user_unknown_words (user_id, word, native_translation, looked_up, last_seen)
-     VALUES (?, ?, ?, 1, strftime('%s','now'))
-     ON CONFLICT(user_id, word) DO UPDATE SET
-       looked_up          = looked_up + 1,
-       last_seen          = strftime('%s','now'),
-       native_translation = COALESCE(user_unknown_words.native_translation, excluded.native_translation)`,
-  ).run(userId, normalized, nativeTranslation?.trim() || null);
+  // intentional no-op
 }
