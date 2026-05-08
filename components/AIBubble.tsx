@@ -45,9 +45,18 @@ interface AIBubbleProps {
   muted?: boolean;
   /** Show three-dot pulse instead of text — used while the message loads. */
   loading?: boolean;
+  /** Skip the fire-and-forget /api/me/words save on tap. Used by the
+   *  playground so test taps don't leak into the user's vocab list. */
+  disableSave?: boolean;
 }
 
-export default function AIBubble({ text, segments, muted = false, loading = false }: AIBubbleProps) {
+export default function AIBubble({
+  text,
+  segments,
+  muted = false,
+  loading = false,
+  disableSave = false,
+}: AIBubbleProps) {
   // Index of the segment whose translation popover is currently open. null = none.
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   // Indexes of segments whose translation has been viewed at least once
@@ -86,6 +95,7 @@ export default function AIBubble({ text, segments, muted = false, loading = fals
         next.add(index);
         return next;
       });
+      if (disableSave) return;
       fetch("/api/me/words", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
