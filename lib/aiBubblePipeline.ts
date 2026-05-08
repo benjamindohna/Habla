@@ -255,8 +255,11 @@ Return ONLY valid JSON:
   "translation": "<contextually-correct ${args.nativeLanguage} translation, same grammatical form>"
 }`;
 
+  // chat_precise (gpt-4o) for the segment + translate combo: compound-tense
+  // detection needs grammatical lookahead (auxiliary → participle) that mini
+  // does not do reliably. See "te haya" / "du hat" miscut for the symptom.
   const parsed = await chatJSON<{ segment?: unknown; translation?: unknown }>({
-    task: "chat_light",
+    task: "chat_precise",
     label: "playground/translateWord",
     systemPrompt: prompt,
     temperature: 0.2,
