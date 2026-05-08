@@ -250,48 +250,44 @@ export async function translateWordInContext(args: {
 The learner has tapped a single word in a ${targetName} sentence because they don't understand it. The tapped word is wrapped in «guillemets» so you know exactly which occurrence they mean (it may appear multiple times in the sentence).
 
 TASK 1 — DECIDE THE SEGMENT (target-language side)
-Decide whether the tapped word stands ALONE or belongs to a multi-word unit. Group it with neighbouring words when:
+Decide whether the tapped word stands ALONE or belongs to a multi-word unit. Group it with related words when:
 - The word is an article ("el", "la", "los", "las", "un", "una", "unos", "unas") and a noun follows → segment = article + noun ("el libro").
-- The word is part of a COMPOUND TENSE: haber + past participle (he visto, había dicho, haya impresionado), estar + gerund (está hablando), ir a + infinitive (voy a hacer), modal periphrases (tener que ir, hay que hacerlo). Include any clitic object pronouns attached to the verbal complex (me, te, lo, la, le, nos, os, los, las, les, se). → segment = the whole construction including clitics ("te haya impresionado", "se ha ido").
+- The word is part of a COMPOUND TENSE: haber + past participle (he visto, había dicho, haya impresionado), estar + gerund (está hablando), ir a + infinitive (voy a hacer), modal periphrases (tener que ir, hay que hacerlo). Include any clitic object pronouns attached to the verbal complex (me, te, lo, la, le, nos, os, los, las, les, se). → segment = the whole construction.
 - The word is part of an IDIOM or fixed expression (tener ganas, darse cuenta, echar de menos, por ejemplo, en cambio, sin embargo). → segment = the whole expression.
 - The word is part of a MULTI-WORD NAMED ENTITY (Estados Unidos, Real Madrid, América Latina). → segment = the whole name.
 Otherwise: segment = just the tapped word.
 
-The segment MUST contain the tapped word and MUST be a CONTIGUOUS SUBSTRING of the original sentence in the EXACT casing and form it appears (do NOT lemmatise the segment — "comió" stays "comió", "ha jugado" stays "ha jugado"). This "no lemmatising" rule applies ONLY to the target-language segment, NOT to the translation.
+The segment MUST contain the tapped word, and every word in the segment MUST appear in the original sentence in its EXACT casing and form (do NOT lemmatise — "comió" stays "comió", "ha jugado" stays "ha jugado"). The segment's words may be NON-ADJACENT in the sentence — if intermediate words don't belong to the unit, skip them and join the kept words with single spaces. This "no lemmatising" rule applies ONLY to the target-language segment, NOT to the translation.
 
 TASK 2 — TRANSLATE THE SEGMENT (native-language side)
-The translation will be displayed to the learner OUT OF CONTEXT, next to the segment, like a vocab card. It must read like a clean ${args.nativeLanguage} entry that makes sense on its own. The rules are different from Task 1:
+The translation is shown OUT OF CONTEXT next to the segment, like a vocab card. It must read like a clean ${args.nativeLanguage} entry on its own.
 
-- PRESERVE THE CONTEXTUAL MEANING the segment has in this sentence. Many words are ambiguous (banco = bench vs bank; fuego = fire vs passion); pick the sense that fits THIS sentence.
-- WRITE NATURAL ${args.nativeLanguage} as it stands alone, NOT a positional copy of the ${targetName} word order. Use standard main-clause word order, not subordinate-clause word order.
-- INCLUDE elements ${args.nativeLanguage} requires that ${targetName} omits. Most important: ${targetName} drops subject pronouns (pro-drop) but ${args.nativeLanguage} often needs them for the phrase to feel complete on a vocab card.
-- KEEP the tense / aspect / person of the segment so the meaning is equivalent.
+Rule per grammatical type of the segment:
 
-Worked examples (target Spanish, native German):
+NOUN → include the ${args.nativeLanguage} definite article with correct gender.
+  "diseño" → "das Design"  ·  "casa" → "das Haus"  ·  "Estados Unidos" → "die Vereinigten Staaten"
 
-- Tapped "diseño" in "un diseño que me gustó"
-  Segment: "diseño" → Translation: "das Design" (German nouns get their article on a vocab card)
+CONJUGATED VERB or COMPOUND TENSE (with or without clitics) → include the subject pronoun:
+  · 1st / 2nd person: ALWAYS include (ich, du, wir, ihr, Sie).
+    "opinas" → "du meinst"  ·  "opino" → "ich meine"  ·  "has visto" → "du hast gesehen"  ·  "voy a hacer" → "ich werde machen"  ·  "te haya impresionado" → "hat dich beeindruckt" (3rd person — see below; the clitic "te" is the OBJECT, not the subject)
+  · 3rd person: prefer "(er/sie)" / "(sie)"; bare verb only when the subject is named explicitly in the sentence and is obvious.
+    "opina" → "(er/sie) meint"  ·  "ha jugado" → "hat gespielt"  ·  "comió" → "(er/sie) aß"
+  · Imperative (no subject in either language): bare form, no pronoun.
+    "mira" → "schau"  ·  "ven" → "komm"
 
-- Tapped "ha" in "Cruijff ha jugado en Barcelona"
-  Segment: "ha jugado" → Translation: "hat gespielt" (3rd person singular; pronoun optional)
+INFINITIVE (often inside an idiom or after a modal): keep as infinitive in ${args.nativeLanguage}.
+  "tener ganas" → "Lust haben"  ·  "echar de menos" → "vermissen"  ·  "darse cuenta" → "merken"
 
-- Tapped "has" in "¿Has visto la película?"
-  Segment: "has visto" → Translation: "du hast gesehen" (2nd person singular needs "du" to feel complete)
+ADJECTIVE / ADVERB: translate plain, no article needed.
+  "rápido" → "schnell"  ·  "muy" → "sehr"  ·  "siempre" → "immer"
 
-- Tapped "haya" in "que te haya impresionado"
-  Segment: "te haya impresionado" → Translation: "hat dich beeindruckt" (NOT "dich beeindruckt hat" — that is German subordinate-clause word order, wrong as a standalone vocab pair)
+ARTICLE / PREPOSITION / FUNCTION WORD as solo segment: translate plain with the contextually correct sense.
+  "para" (depending on context) → "für" or "um zu"  ·  "el" → "der" / "die" / "das" by referent's gender
 
-- Tapped "voy" in "voy a hacer una llamada"
-  Segment: "voy a hacer" → Translation: "ich werde machen" or "ich mache gleich" (1st person singular needs "ich")
-
-- Tapped "tengo" in "no tengo ganas de salir"
-  Segment: "tengo ganas" → Translation: "habe Lust" (or "ich habe Lust" — both fine; the idiom in lemma form would be "Lust haben" but here we keep the inflected sense)
-
-- Tapped "comió" in "ayer comió pasta"
-  Segment: "comió" → Translation: "aß" or "hat gegessen" (preterit, 3rd person)
-
-- Tapped "Estados" in "Estados Unidos"
-  Segment: "Estados Unidos" → Translation: "Vereinigte Staaten"
+In all cases:
+- PRESERVE THE CONTEXTUAL MEANING when ambiguous (banco = bench vs bank; fuego = fire vs passion).
+- USE NATURAL ${args.nativeLanguage} WORD ORDER (main-clause / V2). NEVER subordinate-clause final order. "hat dich beeindruckt" YES; "dich beeindruckt hat" NO.
+- KEEP the tense / aspect / number / person of the segment so the meaning is equivalent.
 
 TASK 3 — RETURN THE WORD INDICES OF THE SEGMENT
 The sentence is also given as an indexed word list below. Return the indices of all words that constitute the segment (so the client can cache the result under every covered index — tapping any of them later shows the same answer without another call).
