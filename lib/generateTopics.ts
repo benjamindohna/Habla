@@ -100,6 +100,11 @@ export async function generateTopicsForUser(
     task: "chat_light",
     label: "generateTopics",
     systemPrompt: prompt,
+    // Topic generation needs diversity — the 4-3-2 split, the exclusion
+    // list, and the "related/random" buckets all assume the model
+    // explores the space. chatJSON's default of 0.2 is for structured
+    // output where determinism is wanted; here we want OpenAI's default.
+    temperature: 1.0,
   });
   const topics = Array.isArray(parsed.topics) ? (parsed.topics as Topic[]) : [];
 
