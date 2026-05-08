@@ -1,11 +1,17 @@
-// Canonicalisation pipeline for vocabulary entries (target_word,
-// native_translation). Implements the rules in ROADMAP.md §1
-// "Vocabulary canonicalisation". Stub-friendly: the LLM-backed casing /
-// proper-noun classifier is injected so the unit tests can run without
-// network calls.
+// Vocab helpers — input normalisation + description generator + (legacy)
+// canonicalisation pipeline.
 //
-// Out of scope for this module: the SRS save logic (Step 1/2/3 lookup +
-// polysemy classification). That comes in a later phase and lives separately.
+// The current ROADMAP architecture ("Vocabulary save & test —
+// English-description-anchored") uses:
+//   - normalizeVocab — pure deterministic input cleanup (kept)
+//   - generateVocabDescription — LLM call producing the sense-key
+//     description used to dedup synonyms and separate polysemes (kept)
+//
+// The Phase A/B casing pipeline + CasingClassifier interface below is
+// LEGACY (see DISREGARDED_IDEAS.md). Will be removed when the new
+// save flow is wired; kept now so the existing tests stay green.
+
+import { chatText } from "./llm";
 
 /**
  * Standard normalisation. Always applied as the very first pass. Steps:
@@ -32,6 +38,93 @@ export function normalizeVocab(s: string, caseSensitive: boolean = false): strin
     .replace(/\s+/g, " ");
   return caseSensitive ? base : base.toLowerCase();
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Description generator — produces the English "sense-key" for a vocab
+// entry. Anchors the SPECIFIC sense the tapped word had in this context.
+// Used by the save flow to:
+//   - dedup synonyms (same sense → same description → single row)
+//   - separate polysemes (different senses → different descriptions →
+//     separate rows with independent SRS state)
+//
+// Cost: gpt-4o-mini, ~250 input + ~10 output tokens, ~$0.000054 per call.
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface DescribeWordArgs {
+  /** The tapped word, surface form as encountered (e.g. "Bancos", "comió"). */
+  target_word: string;
+  /** The sentence in which the word appeared. Currently passed in full;
+   *  if AI replies grow long the caller can window this to ~16 words
+   *  before/after the tapped word. */
+  context_sentence: string;
+  /** e.g. "Spanish". */
+  target_language: string;
+  /** e.g. "German". Used as a frame-setting hint, not as a translation
+   *  reference — the description is in English regardless. */
+  native_language: string;
+}
+
+/**
+ * Generate the English sense-key description for a vocab entry.
+ *
+ * Returns a 3-7 word English phrase. Throws if the model output is
+ * empty or implausibly long (likely a hallucination).
+ *
+ * Prompt validated by manual testing against polysemous Spanish words
+ * (banco, fuego, hoja); model behaviour is consistent on synonym
+ * collapse and polysemy separation.
+ */
+export async function generateVocabDescription(args: DescribeWordArgs): Promise<string> {
+  const prompt = `You are generating a sense-key for a vocabulary entry. The learner is studying ${args.target_language}; their native language is ${args.native_language}. They have just tapped a word in a ${args.target_language} sentence.
+
+Write a SHORT English description (3-7 words) of the SPECIFIC SENSE the tapped word has in this sentence. The description is used as a sense-key: it must be precise enough that two genuinely different meanings of the same word produce noticeably different descriptions, but generic enough that two synonymous translations of the same meaning produce IDENTICAL descriptions.
+
+Rules:
+- 3 to 7 words. No leading article. No trailing period.
+- Describe the meaning, not the form (do not write tense / number).
+- Be neutral about register / dialect.
+
+Worked examples:
+  "banco" in "el banco está cerrado los domingos"        → "financial institution"
+  "banco" in "me senté en el banco del parque"           → "long bench to sit on"
+  "fuego" in "encendió el fuego en la chimenea"          → "literal fire / flame"
+  "fuego" in "siento un fuego dentro al verla"           → "passionate intensity / inner fire"
+  "hoja" in "la hoja se cayó del árbol en otoño"         → "leaf of a plant"
+  "hoja" in "necesito una hoja de papel"                 → "sheet of paper"
+  "hoja" in "la hoja del cuchillo está afilada"          → "blade of a cutting tool"
+  "comer" in "vamos a comer pasta"                       → "to eat (food, meal)"
+  "Madrid" in "vivo en Madrid desde hace cinco años"     → "Madrid (city, capital of Spain)"
+  "Coca-Cola" in "una Coca-Cola fría"                    → "Coca-Cola (the soft drink brand)"
+
+Word: "${args.target_word}"
+Context: "${args.context_sentence}"
+
+Return ONLY the description string. No JSON, no quotes, no explanation.`;
+
+  const raw = await chatText({
+    task: "chat_light",
+    label: "vocab/describe",
+    systemPrompt: prompt,
+    temperature: 0.2,
+  });
+
+  // The model occasionally wraps the output in quotes despite the
+  // instruction. Strip them and any trailing period drift.
+  const cleaned = raw.replace(/^["'\s]+|["'.\s]+$/g, "").trim();
+  if (!cleaned) {
+    throw new Error("vocab/describe: LLM returned empty description");
+  }
+  if (cleaned.length > 80) {
+    throw new Error(`vocab/describe: overlong output (${cleaned.length} chars): "${cleaned}"`);
+  }
+  return cleaned;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// LEGACY — Phase A/B casing pipeline. See DISREGARDED_IDEAS.md.
+// Will be removed when the new save flow is wired; kept now so the
+// existing tests stay green.
+// ─────────────────────────────────────────────────────────────────────────
 
 export type CasingDecision = "always" | "incidental";
 
