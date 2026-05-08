@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import AudioRecorder from "./AudioRecorder";
-import AIBubble, { type AIBubbleSegment } from "./AIBubble";
+import AIBubble from "./AIBubble";
+import type { Segment } from "@/types/segment";
 import UserBubble from "./UserBubble";
 import type { CorrectionResult, Pair } from "@/types/correction";
 
@@ -17,7 +18,7 @@ interface ConversationViewProps {
 }
 
 type Message =
-  | { id: string; role: "ai"; text?: string; segments?: AIBubbleSegment[] | null; muted?: boolean; loading?: boolean }
+  | { id: string; role: "ai"; text?: string; segments?: Segment[] | null; muted?: boolean; loading?: boolean }
   | { id: string; role: "user"; result: CorrectionResult; doneAt: number | null };
 
 type PendingStatus =
@@ -107,7 +108,7 @@ export default function ConversationView({
       body: JSON.stringify({ topic }),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load opener"))))
-      .then((data: { conversationId: number; text: string; segments?: AIBubbleSegment[] | null }) => {
+      .then((data: { conversationId: number; text: string; segments?: Segment[] | null }) => {
         if (cancelled) return;
         setConversationId(data.conversationId);
         setMessages((prev) =>
@@ -230,7 +231,7 @@ export default function ConversationView({
         }),
       });
       if (!res.ok) throw new Error("Reply failed");
-      const data = (await res.json()) as { text: string; segments?: AIBubbleSegment[] | null };
+      const data = (await res.json()) as { text: string; segments?: Segment[] | null };
       setMessages((prev) =>
         prev.map((m) =>
           m.id === loadingId && m.role === "ai"

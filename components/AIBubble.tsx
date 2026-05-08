@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-
-export interface AIBubbleSegment {
-  es: string;
-  native?: string;
-}
+import type { Segment } from "@/types/segment";
 
 /**
  * Defensive whitespace insertion. The LLM is supposed to emit non-tappable
@@ -20,10 +16,10 @@ export interface AIBubbleSegment {
  *  - If current starts with a "glue-before" char (, . ; : ! ? » " ' ) ] }) → no insertion.
  *  - Otherwise → insert a single space.
  */
-function withInferredSpaces(segments: AIBubbleSegment[]): AIBubbleSegment[] {
+function withInferredSpaces(segments: Segment[]): Segment[] {
   const GLUE_AFTER_PREV = /[¿¡«"'([{]/;
   const GLUE_BEFORE_CURR = /[,.;:!?»"')\]}]/;
-  const out: AIBubbleSegment[] = [];
+  const out: Segment[] = [];
   for (let i = 0; i < segments.length; i++) {
     const curr = segments[i];
     if (!curr.es) continue;
@@ -44,7 +40,7 @@ function withInferredSpaces(segments: AIBubbleSegment[]): AIBubbleSegment[] {
 
 interface AIBubbleProps {
   text?: string;
-  segments?: AIBubbleSegment[] | null;
+  segments?: Segment[] | null;
   /** Optional muted styling — used for placeholder/error messages. */
   muted?: boolean;
   /** Show three-dot pulse instead of text — used while the message loads. */
@@ -75,7 +71,7 @@ export default function AIBubble({ text, segments, muted = false, loading = fals
     return () => document.removeEventListener("mousedown", onDown);
   }, [openIndex]);
 
-  function handleSegmentTap(index: number, seg: AIBubbleSegment) {
+  function handleSegmentTap(index: number, seg: Segment) {
     if (!seg.native) return;
     // Toggle if it's already open.
     if (openIndex === index) {

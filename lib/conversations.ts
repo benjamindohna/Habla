@@ -1,17 +1,10 @@
 import { getDb } from "./db";
 import type { Pair } from "@/types/correction";
+import type { Segment } from "@/types/segment";
+
+export type { Segment };
 
 export type MessageRole = "ai" | "user";
-
-/**
- * One unit of an AI message: either a tappable word/phrase (with a `native`
- * translation) or a non-tappable string (punctuation, spacing). Renderer
- * concatenates `es` fields in order to reconstruct the message.
- */
-export interface Segment {
-  es: string;
-  native?: string;
-}
 
 export interface ConversationRow {
   id: number;
