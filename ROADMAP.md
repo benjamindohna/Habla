@@ -114,6 +114,77 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
 
   **No static frequency list needed.** The LLM has implicit frequency knowledge from training. The static `lib/freq/es.txt` originally planned for Phase 8 is dropped — drop also `freq_rank` from `user_unknown_words` if it ends up unused. Personal rank is the source of truth.
 
+  ### Save logic — synonyms vs. polysemy
+
+  When a user taps a word in an AI bubble, the client sends `(target_word, native_translation, context)` to the backend. The backend then runs:
+
+  ```
+  Step 1 — Exact pair already exists?
+    Look up: does an entry with the SAME (target_word, native_translation)
+    already exist for this user?
+      YES → Don't re-save. Treat the lookup as a soft lapse on the existing
+            entry: roll its SRS stage back by one step (rationale: if the user
+            had to look it up again, they didn't really retain it). Update
+            last_seen, looked_up++.
+      NO → Step 2.
+
+  Step 2 — Same target word, different translation?
+    Look up: any entry exists where target_word matches?
+      NO → New entry. Done.
+      YES → Step 3 (LLM call).
+
+  Step 3 — LLM classification (one call):
+    Inputs: existing entry (target_word, native_translation, context),
+            new attempt (target_word, native_translation_new, context_new).
+    Question: are the two native translations essentially synonyms (same
+              meaning, just different wording, like Regen / Niederschlag), or
+              are they genuinely different meanings of the same target word
+              (different lexical sense, like 'banco' as bench vs. as bank)?
+
+      SYNONYMS  → Append the new native_translation to the existing entry's
+                  translations list, e.g. "Regen / Niederschlag". Keep one row.
+                  Stays in the existing entry's SRS stage.
+      DIFFERENT → New independent entry. Both rows have the same target_word,
+                  different context, different translation. SRS stage starts
+                  at 0 for the new entry.
+  ```
+
+  **Schema implications:**
+  - PK changes from composite `(user_id, target_word)` to a separate `id` (auto-increment), with a non-unique index on `(user_id, target_word)`. Multiple entries per user per word are now possible (polysemy case).
+  - `native_translation` becomes a separator-joined string, e.g. `"Regen / Niederschlag"`.
+  - LLM call cost: ~$0.00004 per save where Step 3 fires; happens only when the user looks up a word they already have under a different translation. Most lookups never reach Step 3.
+
+  ### Test logic — multiple entries for the same word
+
+  When the SRS scheduler picks an entry to test and shows the target word, the test logic also checks for OTHER entries for the same `target_word` (polysemy case). Behaviour depends on the SRS stage gap between the entry being tested and the other entries:
+
+  ```
+  Entry being tested: stage T_now
+  Other entries for same target_word: stages [O_1, O_2, ...]
+
+  For each other entry O_i:
+
+    abs(T_now - O_i) ≤ 2:
+      Treat both translations as acceptable. The user can answer with the
+      tested entry's translation OR with O_i's translation; whichever
+      matches gets the +1 progress step.
+
+    O_i is more than 2 stages behind T_now (i.e. T_now - O_i > 2):
+      The user already knows the tested entry well; we want to push them
+      toward the lesser-known meaning O_i.
+      → On the test card, show the tested entry's native_translation
+        STRUCK THROUGH with a small "(nicht erlaubt)" header.
+      → Beside it, a small "?" icon. Hover/tap reveals: "Du hast bereits
+        andere Übersetzungen für dieses Wort gelernt — diesmal suchen wir
+        eine andere."
+      → User must answer with one of the other-entries' translations.
+      → The entry whose translation the user gives is the one that
+        advances. The originally-tested entry's stage is unchanged
+        (open question — flagged below).
+  ```
+
+  **Open question:** when the user answers with another entry's translation, the originally-scheduled entry doesn't move. Default behaviour above is "stays at its stage, gets re-scheduled later". Alternative: also bump the original entry, since the user demonstrated knowledge of the word (just not that specific meaning). Default chosen because it's strict and pedagogically correct — the user did not retrieve the specific meaning that was being tested.
+
   ### Algorithmic future direction
 
   If the simple stage system feels rigid after some real usage data, swap in **FSRS** (Free Spaced Repetition Scheduler — currently the best-performing public SRS algorithm, integrated into Anki since 2024). FSRS uses continuous stability/difficulty per card and re-fits to the user's actual recall data. Higher accuracy, more complex to implement. Worth the upgrade if the discrete-stage system shows obvious gaps.
