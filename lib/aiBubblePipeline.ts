@@ -238,9 +238,13 @@ export async function translateWordInContext(args: {
   word: string;
   wordIndex: number;
   nativeLanguage: string;
-  /** Override the model tier. Defaults to "chat_precise" (gpt-4o), which
-   *  is what production needs for reliable compound-tense detection.
-   *  Pass "chat_light" (gpt-4o-mini) for cheaper/faster A-B comparisons. */
+  /** Override the model tier. Defaults to "chat_light" (gpt-4o-mini),
+   *  which after manual A/B testing on the playground handles the full
+   *  task — segment selection, compound-tense detection, contextual
+   *  translation — correctly. The earlier "te haya / du hat" miscut was
+   *  a prompt-quality issue (since fixed by the by-grammatical-class
+   *  restructure), not a model-capacity issue. Pass "chat_precise"
+   *  (gpt-4o) only if the prompt drifts again on edge cases. */
   task?: ChatTask;
 }): Promise<WordLookupResult> {
   const target = describeTargetLanguage(DEFAULT_TARGET);
@@ -314,11 +318,12 @@ Return ONLY valid JSON:
   "indices": [<int>, <int>, ...]
 }`;
 
-  // chat_precise (gpt-4o) for the segment + translate combo: compound-tense
-  // detection needs grammatical lookahead (auxiliary → participle) that mini
-  // does not do reliably. See "te haya" / "du hat" miscut for the symptom.
-  // Caller can override via args.task to A-B compare.
-  const task = args.task ?? "chat_precise";
+  // Default tier is chat_light (gpt-4o-mini). After the prompt restructure
+  // (worked examples grouped by grammatical class, separate Task 1/2/3
+  // rules) mini handles compound tenses correctly — confirmed via A/B
+  // playground testing against gpt-4o. ~17x cheaper for indistinguishable
+  // output. Caller can pass task="chat_precise" to force gpt-4o.
+  const task = args.task ?? "chat_light";
   const parsed = await chatJSON<{
     segment?: unknown;
     translation?: unknown;
