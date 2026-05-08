@@ -114,187 +114,204 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
 
   **No static frequency list needed.** The LLM has implicit frequency knowledge from training. The static `lib/freq/es.txt` originally planned for Phase 8 is dropped — drop also `freq_rank` from `user_unknown_words` if it ends up unused. Personal rank is the source of truth.
 
-  ### Vocabulary canonicalisation (normalisation + casing filter)
+  ### Vocabulary save & test (English-description-anchored)
 
-  Before any save logic runs, both `target_word` and `native_translation` are run through a canonicalisation pass so the DB never sees superficially different versions of the same string.
+  See [`DISREGARDED_IDEAS.md`](./DISREGARDED_IDEAS.md) for the previous design (native_translation column + Phase A/B casing pipeline + Step 1/2/3 synonym-merging) and the rationale for replacing it.
 
-  **Standard normalisation** (always applied):
-  ```ts
-  function normalizeVocab(s: string, caseSensitive = false): string {
-    const base = s.normalize("NFC").trim()
-      .replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "")  // edge punctuation
-      .replace(/\s+/g, " ");                      // collapse internal whitespace
-    return caseSensitive ? base : base.toLowerCase();
-  }
+  **Core idea.** Don't store the native translation. Store only the target word + a short LLM-generated English description of the SPECIFIC sense the word had in the context where it was tapped. The lowercase target word is the dedup key; the description is what distinguishes polysemous senses. Native translations are computed on-demand at test time — pre-generated for low-progress cards (instant flip), generated lazily for high-progress cards.
+
+  This dissolves the casing problem on the native side (nothing native stored), the synonym-merging problem (synonyms collapse to the same description), and the disambiguator-UI problem (no positive hint shown by default; negative hint generated on-demand only when SRS stages diverge).
+
+  #### Storage shape
+
+  Per row:
+  - `id` PK auto-increment
+  - `user_id` FK
+  - `target_word_original` — surface form as the user encountered it (preserves casing, "comió" stays "comió", do NOT lemmatise)
+  - `target_word_lower` — lowercased form, the dedup key
+  - `english_description` — 3-7 word phrase pinning this specific sense (e.g. `"to sit on (a bench)"` for `banco` as bench, `"financial institution"` for `banco` as bank)
+  - `context_sentence` — the AI-bubble sentence the word was tapped in (kept for audit, possible re-derivation, optional UI hints)
+  - SRS columns: `stage`, `next_due_at`, `correct_streak`, `lapses` (per the existing Spaced Repetition design above)
+  - `created_at`, `last_seen`, `looked_up`
+
+  Indexes:
+  - `(user_id, target_word_lower)` non-unique — dedup lookup at save time
+  - `(user_id, next_due_at)` — SRS scheduling
+
+  No `native_translation` column.
+
+  #### Save flow
+
+  1. Receive `(target_word, context_sentence)` from the AI-bubble tap. The context sentence is the full AI message containing the tapped word.
+  2. Normalise `target_word`: NFC, trim, strip edge punctuation, collapse whitespace. Compute `target_word_lower = normalised.toLowerCase()`.
+  3. Generate English description (gpt-4o-mini, see prompt in `lib/vocab.ts` once implemented). ~80 input + ~10 output tokens, ~$0.000018 per call.
+  4. DB lookup: any existing row for this user with `target_word_lower` matching the new lowercase form?
+     - **No match** → INSERT new row. Done.
+     - **Match exists** → second LLM call (gpt-4o-mini): pass the new description and each matching row's description, ask `"same meaning (synonym) or different meaning (polysemy)?"`.
+       - **Same** → don't save. Treat as duplicate. Soft-lapse the existing row (SRS stage − 1) per the existing rule, with the 5-minute cooldown.
+       - **Different** → INSERT new row. Polysemy is now natively represented as multiple rows sharing `target_word_lower` but with different `english_description` and independent SRS state.
+  5. Conservative tie-breaker: if the comparator returns ambiguous output, prefer to insert a new row. False-positive duplicates are reparable via the manual CRUD UI; lost entries are not.
+
+  **Diacritics are NEVER stripped.** `sí` (yes) and `si` (if) are different words; both `target_word_lower` and `english_description` preserve the diacritic.
+
+  #### Description prompt (gpt-4o-mini)
+
+  Strict, example-driven, with the explicit constraint that synonyms should produce IDENTICAL descriptions while different senses should produce NOTICEABLY different ones. See [Prompt sketch — Description Generator](#prompt-sketch--description-generator) below.
+
+  #### Test / review flow
+
+  Vocab card displays `target_word_original`. The user types or speaks a translation in their native language.
+
+  **LLM-judge per review** (gpt-4o-mini, ~80 input + 1-3 output tokens, ~$0.000018 per call):
+
+  Inputs:
+  - target_word_original
+  - english_description (the sense being tested)
+  - other_descriptions for the same `target_word_lower` (if polysemous)
+  - user's answer (in native language)
+
+  Outputs (single character):
+  - `1` → correct (user's answer is an acceptable translation of THIS sense)
+  - `X` → user's answer matches a DIFFERENT known sense of this word
+  - `0` → wrong (doesn't match any known sense)
+
+  The judge is instructed to be lenient on missing/extra articles, minor typos, synonyms, capitalisation. It rejects only on actual meaning mismatch.
+
+  **SRS update by outcome:**
+  - `1` → advance the row's SRS stage per the standard rules
+  - `X` → SRS stage UNCHANGED on this row, UI shows `"Das ist die andere Bedeutung von '${target_word_original}'."`
+  - `0` → lapse the row's SRS stage per the standard lapse rules (drop 2 stages from stage 3+, reset to 0 from stage 0-2)
+
+  #### Polysemy display logic
+
+  When multiple rows share `target_word_lower`:
+
+  - **Stages similar (gap < 2):** the card shows just `target_word_original`. The user can answer with EITHER meaning. The row whose meaning the user produced advances; the other stays put.
+  - **Stages diverged (gap ≥ 2):** when the lower-progress row is scheduled for review, the card shows `target_word_original` + a NEGATIVE hint generated on-demand: `"Diese Vokabel ist nicht '[other meaning, fetched via on-demand translation of the other row's description]'. Wir suchen die andere."`. The user must produce the weaker sense. Generated by gpt-4o-mini at test time, rare, cheap.
+
+  This negative-hint approach pushes the user toward the weaker meaning without revealing the answer (replaces the previous "always-on positive disambiguator" idea).
+
+  **Edge case:** if the user's answer comes back `X` and the system needs to know which OTHER row matched, the judge's prompt can be expanded to return `X:row_id`. But for the v1 implementation, just returning `X` is enough — the UI message references "the other meaning" without naming it, so the user is gently nudged.
+
+  #### Native-translation on demand (the "flip card" feature)
+
+  The vocab card has a "show me the answer" affordance. When the user flips the card, they see the native-language translation of THIS specific sense.
+
+  Two modes:
+  - **Pre-generated** for cards with stage < 3 (low-progress, where the user is most likely to need to flip). When the SRS scheduler loads the next 5 cards, pre-generate native translations in the background. Zero perceived latency on flip.
+  - **On-demand** for stage ≥ 3 (the user mostly knows these). Generate at flip-time. ~400ms latency, acceptable since the user explicitly asked for the answer.
+
+  Translation prompt (gpt-4o-mini, ~50 input + 5-10 output tokens):
   ```
-  Steps: Unicode NFC composition (so `é` is one code-point, never `e + ◌́`), trim, strip leading/trailing punctuation (Unicode-aware via `\p{P}` — handles `¿`, `¡`, `«`, `»`), collapse internal whitespace. Casing handled separately via the filter below.
+  Translate the ${target_language} word "${target_word_original}" into
+  ${native_language}. The specific sense being tested is:
+  "${english_description}".
 
-  **Order of operations matters.** The very first canonicalisation pass MUST be called with `caseSensitive: true` so the original casing survives into the casing filter. If the default (lowercased) version runs first, every word will look lowercase and the filter has nothing to inspect — the proper-noun branch becomes unreachable. Only after the casing filter has decided per side is `toLowerCase()` applied (to the sides flagged as "incidental" or via the all-lowercase fast path).
-
-  **Diacritics are NEVER stripped.** `si` (if) and `sí` (yes) are different words; `lodash.deburr` and similar are forbidden.
-
-  **Lemmatisation is NEVER applied.** Surface form is preserved per the storage rule (`comió` stays `comió`, not collapsed to `comer`).
-
-  **Casing filter** (only runs when at least one side starts uppercase — runs async, fire-and-forget):
-
-  ```
-  Phase 0 — Fast path
-    If both target_word and native_translation start lowercase:
-      → skip the filter, save with normal lowercase normalisation. Done.
-
-  Phase A — Per-side "always uppercase" check
-    Independently for each side that starts uppercase:
-      LLM judgement: is this word ALWAYS uppercase in this language (proper
-      noun, German noun, brand, etc.) — or is it just incidentally uppercase
-      because of sentence-start position?
-
-      IMPORTANT: the prompt MUST include the other language's translation as
-      reference, so the model knows what the word means. Without that context
-      "Pan" could be either bread (incidental) or a surname (always).
-
-      Result per side: "always" or "incidental"
-
-    Save accordingly:
-      "incidental" → that side stored lowercase
-      "always"     → that side stored with original case
-
-  Phase B — Proper-noun filter
-    ONLY runs when BOTH sides came back "always uppercase" in Phase A.
-
-    LLM judgement: is this a proper noun (person, place, brand)?
-      YES (proper noun):
-        Is the form different across the two languages?
-          DIFFERENT → save with proper case (e.g. Roma / Rom).
-          SAME      → DO NOT save (no learning value, e.g. Madrid / Madrid).
-      NO (not a proper noun): save with respective casings from Phase A.
-  ```
-
-  **Worked examples:**
-
-  | target | native | Phase A (target) | Phase A (native) | Phase B? | Result |
-  |---|---|---|---|---|---|
-  | comer | essen | – | – | no | save (comer / essen) |
-  | Comer (sentence-start) | essen | "incidental" | – | no | save (comer / essen) |
-  | comer | Essen (sentence-start) | – | "incidental" | no | save (comer / essen) |
-  | lluvia | Regen | – | "always" (German noun) | no (only one side) | save (lluvia / Regen) |
-  | Madrid | Madrid | "always" | "always" | yes → same → **skip** | not saved |
-  | Roma | Rom | "always" | "always" | yes → different | save (Roma / Rom) |
-
-  **Cost:** ~$0.00004 per save where the filter triggers (gpt-4o-mini, ~150 input + 30 output tokens per LLM call). The fast path skips the filter entirely for the common all-lowercase case, so most saves are free.
-
-  ### Save logic — synonyms vs. polysemy
-
-  When a user taps a word in an AI bubble, the client sends `(target_word, native_translation)` to the backend. (Context is **not stored** — the acquisition moment, when the user reads the surrounding sentence in the bubble, is what counts pedagogically; review later doesn't need it. The polysemy classification in Step 3 below works fine on translations alone.) The backend then runs:
-
-  ```
-  Step 1 — Exact pair already exists?
-    Look up: does an entry with the SAME (target_word, native_translation)
-    already exist for this user?
-      YES → Don't re-save. Treat the lookup as a soft lapse on the existing
-            entry: roll its SRS stage back by one step (rationale: if the user
-            had to look it up again, they didn't really retain it). Update
-            last_seen, looked_up++.
-      NO → Step 2.
-
-  Step 2 — Same target word, different translation?
-    Look up: any entry exists where target_word matches?
-      NO → New entry. Done.
-      YES → Step 3 (LLM call).
-
-  Step 3 — LLM classification (one call):
-    Inputs: existing entry (target_word, native_translation),
-            new attempt (target_word, native_translation_new).
-    Question: are the two native translations essentially synonyms (same
-              meaning, just different wording, like Regen / Niederschlag), or
-              are they genuinely different meanings of the same target word
-              (different lexical sense, like 'banco' as bench vs. as bank)?
-
-      SYNONYMS  → Append the new native_translation to the existing entry's
-                  translations list, e.g. "Regen / Niederschlag". Keep one row.
-                  Stays in the existing entry's SRS stage.
-      DIFFERENT → New independent entry. Both rows share target_word but have
-                  different translations. SRS stage starts at 0 for the new
-                  entry.
+  Reply with ONLY the most natural ${native_language} equivalent in
+  vocab-card style: include the article for nouns, include the subject
+  pronoun for 1st/2nd person verbs, etc.
   ```
 
-  **Schema implications:**
-  - PK changes from composite `(user_id, target_word)` to a separate `id` (auto-increment), with a non-unique index on `(user_id, target_word)`. Multiple entries per user per word are now possible (polysemy case).
-  - `native_translation` becomes a separator-joined string, e.g. `"Regen / Niederschlag"`.
-  - LLM call cost: ~$0.00004 per save where Step 3 fires; happens only when the user looks up a word they already have under a different translation. Most lookups never reach Step 3.
+  Cache per row. Invalidated only if `english_description` changes (rare).
 
-  ### Visual: save flow
+  #### Cost analysis at scale
 
-  ```mermaid
-  flowchart TD
-      Start([User tippt Wort]) --> Input[/"target_word, native_translation"/]
-      Input --> Norm["normalizeVocab(s, caseSensitive: true)<br/>auf beiden Seiten<br/>(NFC, trim, edge punct, collapse ws —<br/>aber Casing bleibt erhalten)"]
+  Heavy user, 10000 reviews + 500 saves per month:
+  - Saves: 500 × 1 description call + ~10% × 1 comparator call = ~550 calls × $0.000018 ≈ **$0.01**
+  - Reviews: 10000 × 1 judge call = **$0.18**
+  - Native-translation generation: ~5000 calls (preloaded for low-progress, on-demand for high-progress) × $0.000018 ≈ **$0.09**
+  - Negative-hint generation (rare polysemy-divergence cases): negligible
 
-      Norm --> Q1{"Beide Wörter<br/>beginnen lowercase?"}
-      Q1 -- Ja --> Lower["Beide lowercase setzen<br/>(toLowerCase)"]
-      Q1 -- Nein --> PhaseA["<b>Phase A:</b> pro Seite LLM-Check<br/>'always vs incidental uppercase'<br/>(Prompt enthält Übersetzung anderer Sprache als Kontext)"]
+  Total: **<$0.30/month** for an extreme heavy user. Casual users: pennies.
 
-      PhaseA --> Q2{"Beide Seiten<br/>'always uppercase'?"}
-      Q2 -- Nein --> ApplyCase["<b>Casings nach Phase A anwenden</b><br/>incidental → lowercase<br/>always → original case behalten<br/><br/><small><i>Häufigster Fall: genau 1 Wort ist uppercase, 1 ist lowercase.<br/>Prüfung lief nur für das uppercase Wort.<br/>Resultat zwischengespeichert, dann weitergegeben an Step 1.</i></small>"]
-      Q2 -- Ja --> PhaseB["<b>Phase B:</b> LLM-Check<br/>'Ist es ein Eigenname?'"]
+  #### Schema migration from the existing `user_unknown_words` table
 
-      PhaseB --> Q3{"Eigenname?"}
-      Q3 -- Nein --> ApplyCase
-      Q3 -- Ja --> Q4{"In beiden Sprachen<br/>gleich geschrieben?"}
-      Q4 -- Ja --> Skip([SKIP — nicht speichern<br/>z.B. Madrid/Madrid])
-      Q4 -- Nein --> KeepCase[Mit Original-Casing speichern<br/>z.B. Roma/Rom]
-
-      Lower --> S1
-      ApplyCase --> S1
-      KeepCase --> S1
-
-      S1{"<b>Step 1:</b> Exaktes Paar<br/>(target_word, native_translation)<br/>schon vorhanden?"}
-      S1 -- Ja --> Lapse["Soft Lapse:<br/>SRS-Stage −1<br/>looked_up++, last_seen aktualisieren"]
-      S1 -- Nein --> S2{"<b>Step 2:</b> target_word existiert<br/>mit anderer Übersetzung?"}
-
-      S2 -- Nein --> NewEntry[Neuer Eintrag<br/>SRS-Stage = 0]
-      S2 -- Ja --> S3["<b>Step 3:</b> LLM klassifiziert<br/>SYNONYM vs DIFFERENT<br/>(nur Übersetzungen, kein Kontext)"]
-
-      S3 --> Q5{"Klassifikation?"}
-      Q5 -- SYNONYM --> Extend["Übersetzung an bestehenden<br/>Eintrag anhängen<br/>z.B. 'Regen / Niederschlag'"]
-      Q5 -- DIFFERENT --> NewPoly[Neuer eigener Eintrag<br/>Polysemie, SRS-Stage = 0]
-
-      Lapse --> Done([Done])
-      NewEntry --> Done
-      Extend --> Done
-      NewPoly --> Done
-      Skip --> Done
+  Today's schema:
+  ```sql
+  user_unknown_words (
+    user_id, word, native_translation, freq_rank, looked_up, last_seen
+    PRIMARY KEY (user_id, word)
+  )
   ```
 
-  ### Test logic — multiple entries for the same word
-
-  When the SRS scheduler picks an entry to test and shows the target word, the test logic also checks for OTHER entries for the same `target_word` (polysemy case). Behaviour depends on the SRS stage gap between the entry being tested and the other entries:
-
-  ```
-  Entry being tested: stage T_now
-  Other entries for same target_word: stages [O_1, O_2, ...]
-
-  For each other entry O_i:
-
-    abs(T_now - O_i) ≤ 2:
-      Treat both translations as acceptable. The user can answer with the
-      tested entry's translation OR with O_i's translation; whichever
-      matches gets the +1 progress step.
-
-    O_i is more than 2 stages behind T_now (i.e. T_now - O_i > 2):
-      The user already knows the tested entry well; we want to push them
-      toward the lesser-known meaning O_i.
-      → On the test card, show the tested entry's native_translation
-        STRUCK THROUGH with a small "(nicht erlaubt)" header.
-      → Beside it, a small "?" icon. Hover/tap reveals: "Du hast bereits
-        andere Übersetzungen für dieses Wort gelernt — diesmal suchen wir
-        eine andere."
-      → User must answer with one of the other-entries' translations.
-      → The entry whose translation the user gives is the one that
-        advances. The originally-tested entry's stage is unchanged
-        (open question — flagged below).
+  New schema (rough):
+  ```sql
+  user_unknown_words (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    target_word_original TEXT NOT NULL,
+    target_word_lower TEXT NOT NULL,
+    english_description TEXT NOT NULL,
+    context_sentence TEXT,
+    stage INTEGER NOT NULL DEFAULT 0,
+    next_due_at INTEGER,
+    correct_streak INTEGER NOT NULL DEFAULT 0,
+    lapses INTEGER NOT NULL DEFAULT 0,
+    looked_up INTEGER NOT NULL DEFAULT 1,
+    last_seen INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+  );
+  CREATE INDEX idx_uuw_user_lower ON user_unknown_words(user_id, target_word_lower);
+  CREATE INDEX idx_uuw_user_due ON user_unknown_words(user_id, next_due_at);
   ```
 
-  **Open question:** when the user answers with another entry's translation, the originally-scheduled entry doesn't move. Default behaviour above is "stays at its stage, gets re-scheduled later". Alternative: also bump the original entry, since the user demonstrated knowledge of the word (just not that specific meaning). Default chosen because it's strict and pedagogically correct — the user did not retrieve the specific meaning that was being tested.
+  Migration of existing rows (Phase 8 collected `(user_id, word, native_translation)` pairs without descriptions): backfill with a one-shot script that, for each existing row, generates a description from the word + native_translation as a synthetic context. Or: discard existing data (the Phase 8 collection was pre-SRS scaffolding anyway). Final call when the migration is built.
+
+  Done as a real migration in `lib/migrations/` (the migration runner is in place since `6858027`).
+
+  #### Open question — description language
+
+  English is the v1 anchor. Works for German speakers (almost always read English). Breaks for users whose native language is non-English and who don't read English. When the user base expands beyond German speakers, revisit:
+  - Use native language as anchor → gives away the answer at test time.
+  - Use target language as anchor → requires target proficiency the learner doesn't have yet.
+  - Per-user choice → schema gets a flag, descriptions stored per language.
+
+  Defer until needed.
+
+  #### Prompt sketch — Description Generator
+
+  Inputs: `target_word_original`, `context_sentence`, `target_language` (Spanish), `native_language` (German — used only as a hint to the model about the user's reference frame, not to bias the description).
+
+  ```
+  You are generating a sense-key for a vocabulary entry. The learner is
+  studying ${target_language}; their native language is ${native_language}.
+  They have just tapped a word in a ${target_language} sentence.
+
+  Write a SHORT English description (3-7 words) of the SPECIFIC SENSE the
+  tapped word has in this sentence. The description is used as a sense-key:
+  it must be precise enough that two genuinely different meanings of the
+  same word produce noticeably different descriptions, but generic enough
+  that two synonymous translations of the same meaning produce IDENTICAL
+  descriptions.
+
+  Rules:
+  - 3 to 7 words. No leading article. No trailing period.
+  - Describe the meaning, not the form (do not write tense / number).
+  - Be neutral about register / dialect.
+
+  Worked examples:
+    "banco" in "el banco está cerrado los domingos"        → "financial institution"
+    "banco" in "me senté en el banco del parque"           → "long bench to sit on"
+    "fuego" in "encendió el fuego en la chimenea"          → "literal fire / flame"
+    "fuego" in "siento un fuego dentro al verla"           → "passionate intensity / inner fire"
+    "hoja" in "la hoja se cayó del árbol en otoño"         → "leaf of a plant"
+    "hoja" in "necesito una hoja de papel"                 → "sheet of paper"
+    "hoja" in "la hoja del cuchillo está afilada"          → "blade of a cutting tool"
+    "comer" in "vamos a comer pasta"                       → "to eat (food, meal)"
+    "Madrid" in "vivo en Madrid desde hace cinco años"     → "Madrid (city, capital of Spain)"
+    "Coca-Cola" in "una Coca-Cola fría"                    → "Coca-Cola (the soft drink brand)"
+
+  Word: "${target_word_original}"
+  Context: "${context_sentence}"
+
+  Return ONLY the description string. No JSON, no quotes, no explanation.
+  ```
+
+  Output validation: trim, ensure non-empty, ensure ≤ 60 characters. If the model returns something obviously wrong (empty, too long, contains the target word verbatim), retry once.
+
+  #### Open question — what is "soft lapse" in the new model
+
+  The old model soft-lapsed on exact-pair re-lookup (`(target, native)` already saved). The new model has no native side. Adapt to: soft-lapse when `target_word_lower` matches AND the comparator says "same meaning". 5-minute cooldown unchanged. The user looking up a word they already have stored under the same sense is the signal of imperfect retention, regardless of whether they typed the exact same German equivalent or a synonym.
 
   ### Algorithmic future direction
 
@@ -304,17 +321,19 @@ When the user opens the app (post-login), they land on a **dashboard** instead o
 
   Things that are not blockers for the initial Spanish↔German build but should be addressed before the system is generalised or shipped to more users.
 
-  - **The casing filter assumes a Latin/Greek/Cyrillic-script language pair.** It works for European languages where proper nouns are capitalised. For target languages **without case** — Chinese, Japanese, Korean, Arabic, Hebrew, Hindi, Thai, etc. — the "both sides always uppercase" trigger never fires, so the proper-noun skip-detection is silently disabled. *上海 / Shanghai* would be saved as a vocab entry even though it's a 1:1 proper noun. Fix when needed: replace the casing trigger with an unconditional LLM proper-noun check, or make the trigger language-aware (per-language config: "has case → use casing trigger; no case → use unconditional LLM check").
+  - **Race condition on rapid double-taps.** Two concurrent saves of the same word can both pass the lowercase-lookup before either has written, then both insert as polysemous-different rows. Mitigation: serialise per-`(user_id, target_word_lower)` in the application, or add a brief debounce on the AI-bubble tap handler so only one save fires per word per N seconds.
 
-  - **Race condition on rapid double-taps.** Two concurrent saves of the same word can both pass the Step 1 lookup before either has written, then both insert. Mitigation: rely on the DB unique index on `(user_id, target_word)` for non-polysemy entries, or serialise per-word in the application. With the planned PK move to auto-increment `id`, the constraint shifts; a UNIQUE INDEX on `(user_id, target_word, native_translation)` preserves the exact-pair guarantee.
+  - **Description-comparator misclassifications.** The synonym-vs-different LLM call can wrongly merge two distinct senses (false synonym) or wrongly split two identical ones (false polysemy). Mitigations: (1) conservative tie-breaker on ambiguous output (prefer new row over merge); (2) manual CRUD UI lets the learner repair entries; (3) log every comparator decision so we can audit the false-rate later.
 
-  - **Soft-lapse-on-relookup can over-punish cautious users.** If the user taps a word they actually know just to confirm a translation, the SRS stage drops by one. Mitigation: add a 5-minute cooldown — only count the lookup as a lapse if the same `(user_id, target_word)` hasn't been seen in the last N minutes. Avoids penalising re-reads of the same conversation bubble.
+  - **Description generator drift.** The LLM may produce stylistically inconsistent descriptions for similar contexts (e.g. `"a place to sit"` once, `"long bench to sit on"` later for the same bench-sense of `banco`). Strict prompt with worked examples mitigates this. Validation gates after generation (length, non-empty, no verbatim target word) catch obvious failures. If drift remains a problem, consider regenerating descriptions in batch when one looks off.
 
-  - **Data migration when shipping the new schema.** The existing `user_unknown_words` table has the composite PK `(user_id, word)`. The new schema needs an `id` PK with non-unique index on `(user_id, target_word)`, plus the joined `native_translation` string and the SRS columns. SQLite ALTER is limited; the migration is a full table rewrite (`CREATE TABLE _new` → `INSERT INTO _new SELECT FROM old` → `DROP old` → `ALTER RENAME`). Should be a one-shot script alongside the column additions.
+  - **No offline mode.** Every review fires an LLM-judge call; every flip on a stage-3+ card may fire a translation call. The learner needs internet for vocab review. Acceptable for v1; offline-capable mode is a separate feature.
+
+  - **Description language assumes the learner reads English.** v1 is German speakers learning Spanish — fine. For other native-language learners, see the "Open question — description language" section above.
 
   - **Reverse-direction lookups are out of scope.** The system is one-way (target language → native). The user can't tap a German word and look up the Spanish equivalent. Probably fine — we're optimising for the "user is reading target-language content" flow.
 
-  - **LLM classification errors are unrecoverable without UI.** Step 3 (synonym vs polysemy) and the proper-noun check are LLM judgements and occasionally wrong. Without a "manage my vocabulary" UI, mis-classified entries can't be merged, split, or deleted. The vocab-mode UI should include basic CRUD over entries.
+  - **LLM judge errors are unrecoverable without UI.** The judge accepts/rejects/cross-meanings answers, and is occasionally wrong. Without a "manage my vocabulary" UI, mis-classified entries can't be merged, split, deleted, or have their description corrected. The vocab-mode UI must include basic CRUD.
 
 The dashboard becomes the new `/` route; current home becomes something like `/conversation`.
 
@@ -344,7 +363,7 @@ Implementation note: this either opens the topic grid as an overlay, or just spi
 ## Implementation notes
 
 - Dashboard is a thin shell over existing routes — minimal new infra.
-- Vocabulary mode reads from `user_unknown_words` (Phase 8). Sort by personalised priority — see the 3-anchor binary search section above. The `freq_rank` column from the original Phase 8 plan can be dropped if the personalised ranking ends up being the only sort key.
+- Vocabulary mode reads from `user_unknown_words` (rewritten per the Vocabulary save & test section above). Sort by personalised priority — see the 3-anchor binary search section. `freq_rank` is dropped from the new schema. The Phase 8 data collection (legacy `(target_word, native_translation)` rows) is migrated or discarded per the schema-migration plan.
 - "Quick start" can reuse `getCurrentSet()` and just pick one topic at random server-side; or call the LLM for a single fresh topic.
 - Conversation list reads from `conversations` table — already FK'd to user, indexed.
 
