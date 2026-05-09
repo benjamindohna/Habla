@@ -20,6 +20,118 @@ The prompts already read a spec — only the *source* of the spec needs to chang
 
 ---
 
+## Per-language prompt cues (style / location / language)
+
+**Trigger:** prompt-quality work on `localize`, `segment`, `explain`, AI-bubble generation
+**Status:** designed, not implemented; depends on "Per-user target language spec"
+**Related:** "TTS voice / accent — modular per target language" below — same modular shape, both consume the same per-language config
+
+### Problem
+
+The current prompts reference the target language via `describeTargetLanguage(spec)` — that produces a label like *"everyday Castellano Spanish"* and embeds it in the prompt. The label is abstract; the model has to derive concrete patterns (vosotros vs ustedes, distinción in spelling, register cues, regional idioms) from its training on its own. That works for major languages where the model has strong implicit priors, but is inconsistent on edge cases and fails entirely for less-resourced languages.
+
+Concrete improvements I floated during prompt-tuning sessions but couldn't bake into the universal prompt:
+- *"For Castellano, prefer 'coger' over 'agarrar' / 'tomar' for 'to grab'"*
+- *"Use 'vosotros' for plural informal you, not 'ustedes'"*
+- *"Subject pronouns are dropped by default (pro-drop); only include yo / tú / etc. if emphatic"*
+- *"Compound tenses keep haber + participle adjacent without auxiliary insertion"*
+
+These are language-specific. They don't fit in a universal prompt without bloating it for users on different language pairs.
+
+### Solution: a per-spec cues database, injected at prompt-build time
+
+A small data structure keyed by `(target_language, location, style)` that stores structured cues. Prompts that care about target-language nuance look up the cues for the active user's spec and inject them as a "Style cues" block.
+
+Shape:
+```ts
+interface LanguageCues {
+  spec: { language: string; location: string | null; style: string };
+  // Concrete vocabulary preferences this variety is known for
+  vocabulary_hints: string[];        // e.g. ["use coger over agarrar", "prefer móvil over celular"]
+  // Register / pronoun system
+  register_hints: string[];          // e.g. ["use vosotros for plural informal you (not ustedes)"]
+  // Compound-tense / construction examples specific to this language
+  construction_examples: string[];   // e.g. ["he visto", "voy a hacer", "tengo que ir"]
+  // Idiom seed list (helps segmenter decide what NOT to split)
+  idiom_examples: string[];          // e.g. ["tener ganas", "darse cuenta", "echar de menos"]
+  // Pronunciation cues — used only by TTS instructions
+  tts_hints: string[];               // e.g. ["distinción: 'c' before e/i and 'z' as /θ/"]
+  // 2-3 (native-intent → target-output) pairs to anchor localize style
+  localize_examples: { intent: string; output: string }[];
+}
+```
+
+### Storage
+
+**v1: static JSON files.** `lib/languageCues/es-castellano-everyday.json`, `lib/languageCues/es-latino-everyday.json`, etc. One file per spec. Loaded once at boot, cached in memory.
+
+**v2 (when scaled): SQLite table** `language_cues(language TEXT, location TEXT, style TEXT, cues_json TEXT, generated_at INTEGER, PRIMARY KEY (language, location, style))`. Only worth it once cues are user-editable or auto-regenerated.
+
+### Pre-generation workflow
+
+A one-shot script `scripts/generateLanguageCues.ts` that takes a `(language, location, style)` triple and asks an LLM (gpt-4o, one-shot expensive call):
+
+```
+You are configuring a language-learning app for ${language} (${location}, ${style} register).
+Produce structured cues that downstream prompts will use to guide style.
+Return JSON with these fields: vocabulary_hints (3-6 items), register_hints (2-4),
+construction_examples (5-8 typical compound tenses / periphrases), idiom_examples
+(8-12 fixed expressions), tts_hints (1-3 phonetic rules with examples), localize_examples
+(2-3 native→target sentence pairs in the chosen register).
+
+Be specific to THIS variety — don't write generic "use natural language" filler.
+Cite the contrast with sister varieties where helpful (e.g. for Castellano: "vs. Latin
+American 'agarrar/tomar'").
+```
+
+Run once per (language, location, style) triple. Costs ~$0.01 per generation, 1-time.
+Output saved to the JSON file (or DB row).
+
+### Combinatorics
+
+For the realistic v1-launch scope:
+- Spanish: Castellano, Neutral, Latino × everyday, street, office = **9 cues**
+- Hungarian: no location × 3 styles = **3 cues**
+- Polish: no location × 3 styles = **3 cues**
+
+**Total: ~15 cues files.** ~$0.15 one-time generation. Trivial.
+
+When a new language is added (admin task in the future signup-flow), the script auto-runs for all (location × style) combinations of that language. Idempotent.
+
+### Injection at runtime
+
+Each prompt that takes a `nativeLanguage` / target spec also takes the looked-up cues object. Concrete touch-points:
+
+| Prompt | Which cues fields injected |
+|---|---|
+| `localize` (natural + transcript_aware variants) | vocabulary_hints, register_hints, localize_examples |
+| `segment` | idiom_examples (helps the "must not split" rule), construction_examples |
+| `explain` | register_hints (so explanations match user's chosen register) |
+| `translateWordInContext` (AI bubble tap) | construction_examples + idiom_examples (better grouping decisions) |
+| `generateVocabDescription` | (optional — descriptions are in English regardless) |
+| TTS instructions | tts_hints |
+
+The injection format is just a section appended to the existing prompt:
+```
+═════ STYLE CUES (specific to ${target}) ═════
+- ${vocabulary_hints joined as bullets}
+- ${register_hints joined as bullets}
+... etc.
+```
+
+### Risks / open questions
+
+- **Cue drift**: cues encode a particular linguistic snapshot. If language usage shifts (slang, register changes), cues need re-generation. Add a `generated_at` timestamp; flag cues older than ~1 year for review.
+- **Wrong cues propagate everywhere**: a single bad cue affects all prompts using it. Mitigation: validation step after generation (LLM self-review of its own cues), plus manual spot-check before a new language ships to users.
+- **Languages without sufficient training data**: for very low-resource languages the LLM may produce shallow / generic cues. Fallback: smaller cues object, more reliance on universal rules.
+- **User-customisable cues?** Probably not for v1. If a user wants a different register than "everyday", they pick it in settings; we don't let them write their own cues.
+
+### Integration with existing prompt work
+
+The V2 prompts now in `/playground/correct-test` (segment + explain) already have structure that would benefit from cues — segment's "must stay unified" list could extend with `idiom_examples` from the cues; explain's worked example could come from `localize_examples` of the user's spec. When this lands, V2 prompts pull cues from the spec instead of having Spanish-specific examples hardcoded.
+
+---
+
 ## Signup handler should warm topic sets for the new user
 
 **Trigger:** Phase 4 (topic-sets architecture)
