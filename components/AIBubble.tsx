@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { WORD_REGEX } from "@/lib/aiBubblePipeline";
 
 // ── Tokenisation ─────────────────────────────────────────────────────────
@@ -41,6 +42,12 @@ type LookupState =
   | { kind: "done"; result: LookupResult }
   | { kind: "error"; message: string };
 
+interface OpenState {
+  wordIndex: number;
+  word: string;
+  rect: DOMRect;
+}
+
 // ── Component ────────────────────────────────────────────────────────────
 
 interface AIBubbleProps {
@@ -61,34 +68,57 @@ export default function AIBubble({
   loading = false,
   disableSave = false,
 }: AIBubbleProps) {
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [open, setOpen] = useState<OpenState | null>(null);
   const [lookups, setLookups] = useState<Map<number, LookupState>>(new Map());
-  const bubbleRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Reset lookup state when the bubble's text changes (new message, edit).
+  // Reset on text change.
   useEffect(() => {
-    setOpenIndex(null);
+    setOpen(null);
     setLookups(new Map());
   }, [text]);
 
-  // Click-outside closes the open popover.
+  // Close on outside click. The popover is portaled, so we check both
+  // its own ref AND the originating button (we can't easily reach the
+  // button without another ref dance — accept that an outside click on
+  // the same word that's open will close-then-immediately-reopen via
+  // the button onClick; the toggle logic handles that fine).
   useEffect(() => {
-    if (openIndex === null) return;
+    if (!open) return;
     function onDown(e: MouseEvent) {
-      if (!bubbleRef.current?.contains(e.target as Node)) setOpenIndex(null);
+      if (popoverRef.current?.contains(e.target as Node)) return;
+      // If the click hit a word button (any), let the button handler
+      // decide what to do (toggle / switch). Otherwise close.
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-ai-word]")) return;
+      setOpen(null);
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [openIndex]);
+  }, [open]);
 
-  function handleWordTap(token: Extract<Token, { kind: "word" }>) {
+  // Close on any scroll — capture phase to catch the messages container's
+  // scroll, plus window resize since fixed-positioned popover would dangle.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(null);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  function handleWordTap(token: Extract<Token, { kind: "word" }>, button: HTMLButtonElement) {
     if (!text) return;
-    if (openIndex === token.wordIndex) {
-      setOpenIndex(null);
+    if (open?.wordIndex === token.wordIndex) {
+      setOpen(null);
       return;
     }
-    setOpenIndex(token.wordIndex);
-    if (lookups.has(token.wordIndex)) return; // cached
+    const rect = button.getBoundingClientRect();
+    setOpen({ wordIndex: token.wordIndex, word: token.text, rect });
+    if (lookups.has(token.wordIndex)) return;
 
     setLookups((prev) => {
       const next = new Map(prev);
@@ -96,8 +126,6 @@ export default function AIBubble({
       return next;
     });
 
-    // Translate the tapped word in context. Same endpoint the playground
-    // uses; production reuses the proven pipeline.
     fetch("/api/playground/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -115,29 +143,18 @@ export default function AIBubble({
         return res.json() as Promise<LookupResult>;
       })
       .then((result) => {
-        // Cache under every covered index so a later tap on a related
-        // word in the same segment returns the same answer instantly.
         setLookups((prev) => {
           const next = new Map(prev);
           const state: LookupState = { kind: "done", result };
           for (const idx of result.indices) next.set(idx, state);
           return next;
         });
-
-        // Fire-and-forget save to the user's vocab list. Skipped when
-        // disableSave is on (playground). The new save flow handles
-        // dedup and polysemy server-side.
         if (!disableSave) {
           fetch("/api/me/vocab", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              segment: result.segment,
-              context: text,
-            }),
-          }).catch(() => {
-            // Silent — failed save is non-blocking; user still sees translation.
-          });
+            body: JSON.stringify({ segment: result.segment, context: text }),
+          }).catch(() => {});
         }
       })
       .catch((err: Error) => {
@@ -159,7 +176,7 @@ export default function AIBubble({
 
   return (
     <div className="flex justify-start">
-      <div ref={bubbleRef} className={`${baseClasses} relative`}>
+      <div className={baseClasses}>
         {loading ? (
           <PulsingDots />
         ) : tokens ? (
@@ -171,9 +188,9 @@ export default function AIBubble({
                 <WordButton
                   key={i}
                   token={tok}
-                  open={openIndex === tok.wordIndex}
+                  open={open?.wordIndex === tok.wordIndex}
                   lookup={lookups.get(tok.wordIndex)}
-                  onTap={() => handleWordTap(tok)}
+                  onTap={(button) => handleWordTap(tok, button)}
                 />
               ),
             )}
@@ -182,11 +199,21 @@ export default function AIBubble({
           <span className="whitespace-pre-wrap">{text}</span>
         )}
       </div>
+      {open &&
+        createPortal(
+          <PortaledPopover
+            ref={popoverRef}
+            anchor={open.rect}
+            tappedWord={open.word}
+            lookup={lookups.get(open.wordIndex)}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
 
-// ── Word button + popover ────────────────────────────────────────────────
+// ── Word button (no popover — the popover is portaled) ───────────────────
 
 function WordButton({
   token,
@@ -197,58 +224,72 @@ function WordButton({
   token: Extract<Token, { kind: "word" }>;
   open: boolean;
   lookup: LookupState | undefined;
-  onTap: () => void;
+  onTap: (button: HTMLButtonElement) => void;
 }) {
   const looked = lookup?.kind === "done";
   return (
-    <span className="relative inline-block">
-      <button
-        onClick={onTap}
-        className={
-          "cursor-pointer rounded transition-colors px-0.5 -mx-0.5 " +
-          (open
-            ? "bg-amber-100 text-neutral-900"
-            : looked
-            ? "underline decoration-dotted decoration-neutral-300 underline-offset-[3px] hover:bg-neutral-200"
-            : "hover:bg-neutral-200")
-        }
-      >
-        {token.text}
-      </button>
-      {open && <Popover lookup={lookup} tappedWord={token.text} />}
-    </span>
+    <button
+      data-ai-word
+      onClick={(e) => onTap(e.currentTarget)}
+      className={
+        "cursor-pointer rounded transition-colors px-0.5 -mx-0.5 " +
+        (open
+          ? "bg-amber-100 text-neutral-900"
+          : looked
+          ? "underline decoration-dotted decoration-neutral-300 underline-offset-[3px] hover:bg-neutral-200"
+          : "hover:bg-neutral-200")
+      }
+    >
+      {token.text}
+    </button>
   );
 }
 
-function Popover({
-  lookup,
-  tappedWord,
-}: {
-  lookup: LookupState | undefined;
+// ── Portaled popover ─────────────────────────────────────────────────────
+
+interface PortaledPopoverProps {
+  anchor: DOMRect;
   tappedWord: string;
-}) {
-  return (
-    <span
-      role="tooltip"
-      className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 rounded-lg bg-neutral-900 text-white text-xs px-3 py-2 shadow-md min-w-[140px] max-w-[280px]"
-    >
-      {!lookup || lookup.kind === "loading" ? (
-        <span className="inline-flex items-center gap-2">
-          <span className="block w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-          <span className="text-white/80">Übersetze…</span>
-        </span>
-      ) : lookup.kind === "error" ? (
-        <span className="text-red-300">{lookup.message}</span>
-      ) : (
-        <ResultBody result={lookup.result} tappedWord={tappedWord} />
-      )}
-      <span
-        aria-hidden="true"
-        className="absolute left-1/2 -translate-x-1/2 top-full -mt-px w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-neutral-900"
-      />
-    </span>
-  );
+  lookup: LookupState | undefined;
 }
+
+const PortaledPopover = forwardRef<HTMLDivElement, PortaledPopoverProps>(
+  function PortaledPopover({ anchor, tappedWord, lookup }, ref) {
+    const GAP = 8;
+    // Anchor the popover ABOVE the word using `bottom`. position: fixed
+    // escapes the messages container's overflow-y-auto clipping.
+    const style: React.CSSProperties = {
+      position: "fixed",
+      bottom: window.innerHeight - anchor.top + GAP,
+      left: anchor.left + anchor.width / 2,
+      transform: "translateX(-50%)",
+      zIndex: 50,
+    };
+    return (
+      <div
+        ref={ref}
+        role="tooltip"
+        style={style}
+        className="rounded-lg bg-neutral-900 text-white text-xs px-3 py-2 shadow-md min-w-[140px] max-w-[280px]"
+      >
+        {!lookup || lookup.kind === "loading" ? (
+          <span className="inline-flex items-center gap-2">
+            <span className="block w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+            <span className="text-white/80">Übersetze…</span>
+          </span>
+        ) : lookup.kind === "error" ? (
+          <span className="text-red-300">{lookup.message}</span>
+        ) : (
+          <ResultBody result={lookup.result} tappedWord={tappedWord} />
+        )}
+        <span
+          aria-hidden="true"
+          className="absolute left-1/2 -translate-x-1/2 top-full -mt-px w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-neutral-900"
+        />
+      </div>
+    );
+  },
+);
 
 function ResultBody({ result, tappedWord }: { result: LookupResult; tappedWord: string }) {
   const norm = (s: string) => s.trim().toLowerCase();
