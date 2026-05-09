@@ -4,12 +4,23 @@ import { useEffect, useRef, useState } from "react";
 import AudioRecorder from "./AudioRecorder";
 import AIBubble from "./AIBubble";
 import UserBubble from "./UserBubble";
+import SealedUserBubble from "./SealedUserBubble";
 import type { CorrectionResult } from "@/types/correction";
 
 type CorrectionStyle = "natural" | "transcript_aware";
 
+export interface InitialMessage {
+  id: number;
+  role: "ai" | "user";
+  textEs: string;
+  // We don't reconstruct the full CorrectionResult for past user
+  // turns; they render as SealedUserBubbles.
+}
+
 interface ConversationViewProps {
+  conversationId: number;
   topic: string;
+  initialMessages: InitialMessage[];
   nativeLanguage: string;
   correctionStyle: CorrectionStyle;
   onBack: () => void;
@@ -18,6 +29,7 @@ interface ConversationViewProps {
 
 type Message =
   | { id: string; role: "ai"; text?: string; muted?: boolean; loading?: boolean }
+  | { id: string; role: "user-sealed"; textEs: string }
   | { id: string; role: "user"; result: CorrectionResult; doneAt: number | null };
 
 type PendingStatus =
@@ -55,56 +67,23 @@ async function correctTranscript(args: {
 // ── Component ─────────────────────────────────────────────────────────────
 
 export default function ConversationView({
+  conversationId,
   topic,
+  initialMessages,
   nativeLanguage,
   correctionStyle,
   onBack,
   onLogout,
 }: ConversationViewProps) {
-  const openerIdRef = useRef<string>(crypto.randomUUID());
-  const [messages, setMessages] = useState<Message[]>(() => [
-    { id: openerIdRef.current, role: "ai", loading: true },
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() =>
+    initialMessages.map((m) =>
+      m.role === "ai"
+        ? ({ id: `seed-${m.id}`, role: "ai", text: m.textEs } as Message)
+        : ({ id: `seed-${m.id}`, role: "user-sealed", textEs: m.textEs } as Message),
+    ),
+  );
   const [pending, setPending] = useState<PendingStatus>({ stage: "idle" });
-  const [conversationId, setConversationId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Fetch the LLM-generated opener on mount.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/converse/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic }),
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load opener"))))
-      .then((data: { conversationId: number; text: string }) => {
-        if (cancelled) return;
-        setConversationId(data.conversationId);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === openerIdRef.current && m.role === "ai"
-              ? { ...m, text: data.text, loading: false }
-              : m,
-          ),
-        );
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === openerIdRef.current && m.role === "ai"
-              ? { ...m, text: `(Couldn't load opener. Topic: ${topic})`, loading: false, muted: true }
-              : m,
-          ),
-        );
-      });
-    return () => {
-      cancelled = true;
-    };
-    // Deliberately runs once on mount — opener is per-conversation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Auto-scroll to the bottom on every message append or status change.
   useEffect(() => {
@@ -159,7 +138,7 @@ export default function ConversationView({
 
   async function handleDone(messageId: string) {
     const userMsg = messages.find((m) => m.id === messageId);
-    if (!userMsg || userMsg.role !== "user" || conversationId === null) return;
+    if (!userMsg || userMsg.role !== "user") return;
 
     // Mark this user bubble as Done (hides its Done button).
     setMessages((prev) =>
@@ -212,11 +191,9 @@ export default function ConversationView({
     // Fire-and-forget: harvest interests + invalidate the stale 'next' topic
     // set so future re-rolls reflect this conversation. User navigates home
     // immediately; if the network call lags or fails, no UX impact.
-    if (conversationId !== null) {
-      fetch(`/api/conversations/${conversationId}/extract`, {
-        method: "POST",
-      }).catch(() => {});
-    }
+    fetch(`/api/conversations/${conversationId}/extract`, {
+      method: "POST",
+    }).catch(() => {});
     onBack();
   }
 
@@ -248,15 +225,21 @@ export default function ConversationView({
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
         <div className="w-full max-w-3xl mx-auto space-y-6">
-          {messages.map((msg) =>
-            msg.role === "ai" ? (
-              <AIBubble
-                key={msg.id}
-                text={msg.text}
-                muted={msg.muted}
-                loading={msg.loading}
-              />
-            ) : (
+          {messages.map((msg) => {
+            if (msg.role === "ai") {
+              return (
+                <AIBubble
+                  key={msg.id}
+                  text={msg.text}
+                  muted={msg.muted}
+                  loading={msg.loading}
+                />
+              );
+            }
+            if (msg.role === "user-sealed") {
+              return <SealedUserBubble key={msg.id} textEs={msg.textEs} />;
+            }
+            return (
               <UserBubble
                 key={msg.id}
                 result={msg.result}
@@ -265,8 +248,8 @@ export default function ConversationView({
                 onDone={() => handleDone(msg.id)}
                 onReCorrect={(override) => handleReCorrect(msg.id, override)}
               />
-            ),
-          )}
+            );
+          })}
 
           {pending.stage === "processing" && (
             <div className="flex justify-end">

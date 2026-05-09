@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import TopicGrid, { type Topic } from "@/components/TopicGrid";
-import ConversationView from "@/components/ConversationView";
 
 interface TopicWithKind extends Topic {
   kind: "match" | "related" | "random";
@@ -21,12 +20,12 @@ interface Me {
   correctionStyle: CorrectionStyle;
 }
 
-type AppMode = { kind: "home" } | { kind: "chat"; topic: string };
-
 export default function Page() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
-  const [mode, setMode] = useState<AppMode>({ kind: "home" });
+  // True while we're starting a new conversation (post tile-tap, awaiting
+  // /api/converse/start, before navigation to /chat/[id]).
+  const [starting, setStarting] = useState<string | null>(null);
 
   // Topics for the home grid. null = loading; [] = error fetching first set.
   const [topics, setTopics] = useState<TopicWithKind[] | null>(null);
@@ -107,8 +106,9 @@ export default function Page() {
     }
   }
 
-  function enterChat(topic: Topic) {
-    setMode({ kind: "chat", topic: topic.es });
+  async function enterChat(topic: Topic) {
+    if (starting) return;
+    setStarting(topic.es);
     // Fire-and-forget: record the tap so future topic generations drift toward
     // what the user actually engages with. Failure is non-blocking.
     fetch("/api/me/interests", {
@@ -116,10 +116,20 @@ export default function Page() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ interest: topic.es }),
     }).catch(() => {});
-  }
 
-  function backToHome() {
-    setMode({ kind: "home" });
+    try {
+      const res = await fetch("/api/converse/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topic.es }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { conversationId: number; text: string };
+      router.push(`/chat/${data.conversationId}`);
+    } catch (err) {
+      console.error("[enterChat]", err);
+      setStarting(null);
+    }
   }
 
   // ── Loading ─────────────────────────────────────────────────────────────
@@ -131,20 +141,7 @@ export default function Page() {
     );
   }
 
-  // ── Chat mode ───────────────────────────────────────────────────────────
-  if (mode.kind === "chat") {
-    return (
-      <ConversationView
-        topic={mode.topic}
-        nativeLanguage={me.nativeLanguage}
-        correctionStyle={me.correctionStyle}
-        onBack={backToHome}
-        onLogout={handleLogout}
-      />
-    );
-  }
-
-  // ── Home mode ───────────────────────────────────────────────────────────
+  // ── Home ────────────────────────────────────────────────────────────────
   const showLoading = topics === null;
   return (
     <main className="flex min-h-screen flex-col items-center px-4 py-8">
@@ -173,9 +170,12 @@ export default function Page() {
           Hola, ¿de qué quieres hablar hoy?
         </h1>
 
-        <TopicGrid topics={topics ?? []} onSelect={enterChat} disabled={showLoading || rerolling} />
+        <TopicGrid topics={topics ?? []} onSelect={enterChat} disabled={showLoading || rerolling || starting !== null} />
 
         {topicsError && <p className="text-xs text-red-500">{topicsError}</p>}
+        {starting !== null && (
+          <p className="text-xs text-neutral-400">Starting chat about &ldquo;{starting}&rdquo;…</p>
+        )}
 
         <button
           onClick={handleReroll}
