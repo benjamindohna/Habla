@@ -172,7 +172,7 @@ export default function VocabLivePage() {
                         {r.target_word_original}
                       </span>
                       <span className="text-xs text-neutral-400">
-                        stage {r.stage} · #{r.id}
+                        stage {r.stage} · id {r.id}
                       </span>
                       {isNew && (
                         <span className="text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-100 rounded px-1.5 py-0.5">
