@@ -60,6 +60,10 @@ interface AIBubbleProps {
   /** Skip the fire-and-forget /api/me/vocab save on first tap. Used by
    *  the playground so test taps don't pollute the user's vocab list. */
   disableSave?: boolean;
+  /** When true, auto-play the TTS once the preload finishes. Set per-bubble
+   *  by ConversationView based on (autoRead toggle && this is a fresh
+   *  message added during the session). */
+  autoPlay?: boolean;
 }
 
 export default function AIBubble({
@@ -67,10 +71,92 @@ export default function AIBubble({
   muted = false,
   loading = false,
   disableSave = false,
+  autoPlay = false,
 }: AIBubbleProps) {
   const [open, setOpen] = useState<OpenState | null>(null);
   const [lookups, setLookups] = useState<Map<number, LookupState>>(new Map());
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // ── TTS state ─────────────────────────────────────────────────────────
+  const [ttsBlob, setTtsBlob] = useState<Blob | null>(null);
+  const [ttsLoading, setTtsLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoPlayedRef = useRef(false);
+
+  // Preload TTS as soon as text is available. Auto-play once when the
+  // blob lands if autoPlay was true at that moment.
+  useEffect(() => {
+    if (!text || muted || loading) return;
+    autoPlayedRef.current = false;
+    setTtsBlob(null);
+    setTtsLoading(true);
+    let cancelled = false;
+    fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, speed: 1.0 }),
+    })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (cancelled) return;
+        setTtsLoading(false);
+        if (!blob) return;
+        setTtsBlob(blob);
+        if (autoPlay && !autoPlayedRef.current && !audioRef.current) {
+          autoPlayedRef.current = true;
+          playBlob(blob);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setTtsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // intentionally NOT depending on autoPlay so that toggling Auto-Read
+    // mid-bubble doesn't retroactively play already-arrived messages.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, muted, loading]);
+
+  // Cleanup any running audio on unmount.
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  function playBlob(blob: Blob) {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+      setIsPlaying(false);
+    };
+    audio
+      .play()
+      .then(() => setIsPlaying(true))
+      .catch(() => setIsPlaying(false));
+  }
+
+  function toggleTts() {
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setIsPlaying(false);
+      return;
+    }
+    if (ttsBlob) playBlob(ttsBlob);
+  }
 
   // Reset on text change.
   useEffect(() => {
@@ -178,29 +264,43 @@ export default function AIBubble({
 
   const tokens = !loading && text ? tokenize(text) : null;
 
+  const showSpeakControls = !loading && !muted && text;
+
   return (
     <div className="flex justify-start">
-      <div className={baseClasses}>
-        {loading ? (
-          <PulsingDots />
-        ) : tokens ? (
-          <span className="whitespace-pre-wrap">
-            {tokens.map((tok, i) =>
-              tok.kind === "spacing" ? (
-                <span key={i}>{tok.text}</span>
-              ) : (
-                <WordButton
-                  key={i}
-                  token={tok}
-                  open={open?.wordIndex === tok.wordIndex}
-                  lookup={lookups.get(tok.wordIndex)}
-                  onTap={(button) => handleWordTap(tok, button)}
-                />
-              ),
-            )}
-          </span>
-        ) : (
-          <span className="whitespace-pre-wrap">{text}</span>
+      <div className="flex flex-col items-start max-w-[80%]">
+        <div className={baseClasses}>
+          {loading ? (
+            <PulsingDots />
+          ) : tokens ? (
+            <span className="whitespace-pre-wrap">
+              {tokens.map((tok, i) =>
+                tok.kind === "spacing" ? (
+                  <span key={i}>{tok.text}</span>
+                ) : (
+                  <WordButton
+                    key={i}
+                    token={tok}
+                    open={open?.wordIndex === tok.wordIndex}
+                    lookup={lookups.get(tok.wordIndex)}
+                    onTap={(button) => handleWordTap(tok, button)}
+                  />
+                ),
+              )}
+            </span>
+          ) : (
+            <span className="whitespace-pre-wrap">{text}</span>
+          )}
+        </div>
+        {showSpeakControls && (
+          <button
+            onClick={toggleTts}
+            disabled={!ttsBlob && ttsLoading}
+            className="mt-1 ml-1 text-xs text-neutral-400 hover:text-neutral-700 transition-colors inline-flex items-center gap-1 disabled:opacity-60"
+            aria-label={isPlaying ? "Stop" : "Speak"}
+          >
+            {isPlaying ? "■ Stop" : ttsLoading && !ttsBlob ? "Loading audio…" : "▶ Speak"}
+          </button>
         )}
       </div>
       {open &&

@@ -28,9 +28,9 @@ interface ConversationViewProps {
 }
 
 type Message =
-  | { id: string; role: "ai"; text?: string; muted?: boolean; loading?: boolean }
+  | { id: string; role: "ai"; text?: string; muted?: boolean; loading?: boolean; isFresh?: boolean }
   | { id: string; role: "user-sealed"; textEs: string }
-  | { id: string; role: "user"; result: CorrectionResult; doneAt: number | null };
+  | { id: string; role: "user"; result: CorrectionResult; doneAt: number | null; isFresh?: boolean };
 
 type PendingStatus =
   | { stage: "idle" }
@@ -85,6 +85,21 @@ export default function ConversationView({
   const [pending, setPending] = useState<PendingStatus>({ stage: "idle" });
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Auto-Read toggle: when on, every fresh AI bubble auto-plays its TTS
+  // when preload finishes, and every fresh user bubble auto-plays the
+  // corrected sentence. Persisted in localStorage so the preference
+  // survives across sessions. "Fresh" means added during this mount —
+  // bubbles loaded from DB on /chat/[id] navigation don't auto-play.
+  const [autoRead, setAutoRead] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setAutoRead(window.localStorage.getItem("autoRead") === "1");
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("autoRead", autoRead ? "1" : "0");
+  }, [autoRead]);
+
   // Auto-scroll to the bottom on every message append or status change.
   useEffect(() => {
     const el = scrollRef.current;
@@ -112,7 +127,7 @@ export default function ConversationView({
       const result = await runPipeline(transcript);
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "user", result, doneAt: null },
+        { id: crypto.randomUUID(), role: "user", result, doneAt: null, isFresh: true },
       ]);
       setPending({ stage: "idle" });
     } catch (err) {
@@ -149,7 +164,7 @@ export default function ConversationView({
 
     // Append a loading AI bubble while we wait for the reply.
     const loadingId = crypto.randomUUID();
-    setMessages((prev) => [...prev, { id: loadingId, role: "ai", loading: true }]);
+    setMessages((prev) => [...prev, { id: loadingId, role: "ai", loading: true, isFresh: true }]);
 
     try {
       const res = await fetch("/api/converse/turn", {
@@ -205,20 +220,35 @@ export default function ConversationView({
     <main className="flex flex-col h-screen">
       {/* Header */}
       <header className="border-b border-neutral-200 bg-white">
-        <div className="w-full max-w-3xl mx-auto flex items-center justify-between px-4 py-3">
+        <div className="w-full max-w-3xl mx-auto flex items-center justify-between gap-3 px-4 py-3">
           <button
             onClick={handleBack}
-            className="text-sm text-neutral-500 hover:text-neutral-800 transition-colors"
+            className="text-sm text-neutral-500 hover:text-neutral-800 transition-colors shrink-0"
           >
             ← Back
           </button>
-          <p className="text-sm font-medium text-neutral-700 truncate mx-4">{topic}</p>
-          <button
-            onClick={onLogout}
-            className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
-          >
-            Sign out
-          </button>
+          <p className="text-sm font-medium text-neutral-700 truncate flex-1 text-center">{topic}</p>
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setAutoRead((v) => !v)}
+              className={
+                "text-xs transition-colors inline-flex items-center gap-1 " +
+                (autoRead
+                  ? "text-emerald-600 hover:text-emerald-700"
+                  : "text-neutral-400 hover:text-neutral-600")
+              }
+              title={autoRead ? "Auto-Read on — click to disable" : "Auto-Read off — click to enable"}
+            >
+              <span aria-hidden="true">{autoRead ? "🔊" : "🔇"}</span>
+              <span>Auto-Read</span>
+            </button>
+            <button
+              onClick={onLogout}
+              className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 
@@ -233,6 +263,7 @@ export default function ConversationView({
                   text={msg.text}
                   muted={msg.muted}
                   loading={msg.loading}
+                  autoPlay={autoRead && !!msg.isFresh}
                 />
               );
             }
@@ -247,6 +278,7 @@ export default function ConversationView({
                 showDone={msg.id === latestUserMsg?.id && msg.doneAt === null}
                 onDone={() => handleDone(msg.id)}
                 onReCorrect={(override) => handleReCorrect(msg.id, override)}
+                autoPlay={autoRead && !!msg.isFresh}
               />
             );
           })}

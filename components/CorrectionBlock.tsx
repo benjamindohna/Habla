@@ -12,6 +12,10 @@ interface CorrectionBlockProps {
   /** Override the explain prompt version. undefined → server default (V2).
    *  Playground sets explicit boolean via the prompt-version toggle. */
   improvedExplainPrompt?: boolean;
+  /** When true, auto-play the corrected sentence's TTS once preload
+   *  finishes. Driven by the chat-level Auto-Read toggle for fresh
+   *  user turns only (not for past turns loaded from DB). */
+  autoPlay?: boolean;
 }
 
 export default function CorrectionBlock({
@@ -19,6 +23,7 @@ export default function CorrectionBlock({
   nativeLanguage,
   explainMini,
   improvedExplainPrompt,
+  autoPlay = false,
 }: CorrectionBlockProps) {
   const [selectedPair, setSelectedPair] = useState<Pair | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -32,6 +37,8 @@ export default function CorrectionBlock({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // Cached blobs per speed so repeated clicks skip the API call
   const blobCacheRef = useRef<{ normal?: Blob; slow?: Blob }>({});
+  // Has Auto-Read already triggered the auto-play for this result?
+  const autoPlayedRef = useRef(false);
 
   // Clear everything when a new result arrives (new recording)
   useEffect(() => {
@@ -42,6 +49,7 @@ export default function CorrectionBlock({
     setPlayCount(0);
     setIsPlaying(false);
     blobCacheRef.current = {};
+    autoPlayedRef.current = false;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
@@ -57,7 +65,16 @@ export default function CorrectionBlock({
     })
       .then((r) => (r.ok ? r.blob() : null))
       .then((blob) => {
-        if (!cancelled && blob) blobCacheRef.current.normal = blob;
+        if (cancelled || !blob) return;
+        blobCacheRef.current.normal = blob;
+        // Auto-Read: if turned on at the moment the blob arrived, play
+        // once. Captured via autoPlay-at-fetch-start through the closure
+        // — toggling the chat-level Auto-Read while the audio loads
+        // does not retroactively trigger old bubbles.
+        if (autoPlay && !autoPlayedRef.current && !audioRef.current) {
+          autoPlayedRef.current = true;
+          playCachedNormal();
+        }
       })
       .catch(() => {
         // Silent — handleSpeak will fall back to a fresh fetch on click.
@@ -65,7 +82,32 @@ export default function CorrectionBlock({
     return () => {
       cancelled = true;
     };
+    // intentionally NOT depending on autoPlay so toggling Auto-Read
+    // doesn't retroactively replay already-loaded bubbles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
+
+  function playCachedNormal() {
+    const blob = blobCacheRef.current.normal;
+    if (!blob) return;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+      setPlayCount((c) => c + 1);
+      setIsPlaying(false);
+    };
+    audio
+      .play()
+      .then(() => setIsPlaying(true))
+      .catch(() => setIsPlaying(false));
+  }
 
   async function handlePairClick(pair: Pair, index: number) {
     if (pair.is_match) return;

@@ -14,6 +14,9 @@ interface UserBubbleProps {
   explainMini?: boolean;
   /** Override forwarded to CorrectionBlock. undefined → server defaults. */
   improvedExplainPrompt?: boolean;
+  /** When true, CorrectionBlock auto-plays the corrected sentence's TTS
+   *  once preload finishes (Auto-Read toggle in the chat). */
+  autoPlay?: boolean;
 }
 
 // One user turn in the chat: the corrected interpretation, the segmented
@@ -28,6 +31,7 @@ export default function UserBubble({
   onReCorrect,
   explainMini,
   improvedExplainPrompt,
+  autoPlay,
 }: UserBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(result.intended_meaning_native);
@@ -85,6 +89,7 @@ export default function UserBubble({
           nativeLanguage={nativeLanguage}
           explainMini={explainMini}
           improvedExplainPrompt={improvedExplainPrompt}
+          autoPlay={autoPlay}
         />
 
         {/* Done — only shown on the latest user bubble while AI hasn't replied */}
