@@ -114,20 +114,3 @@ export function setUserCorrectionStyle(userId: number, style: CorrectionStyle): 
   db.prepare("UPDATE users SET correction_style = ? WHERE id = ?").run(style, userId);
 }
 
-/**
- * Legacy no-op. The user_unknown_words table was dropped in migration
- * 0002_vocab_v2. The new save flow lives at /api/me/vocab and handles
- * description generation, dedup, and polysemy classification.
- *
- * This stub stays so that the production AIBubble's fire-and-forget
- * POST to /api/me/words doesn't 500 — keeps the chat working during
- * the transition. Phase B replaces the call site and removes both this
- * function and the /api/me/words route.
- */
-export function recordLookedUpWord(
-  _userId: number,
-  _word: string,
-  _nativeTranslation: string | null,
-): void {
-  // intentional no-op
-}
