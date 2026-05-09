@@ -270,6 +270,14 @@ export default function ConversationView({
             if (msg.role === "user-sealed") {
               return <SealedUserBubble key={msg.id} textEs={msg.textEs} />;
             }
+            // User turn that's already been Done'd → collapse the rich
+            // correction view into a sealed bubble. The full view stays
+            // only for the latest unfinished user turn.
+            if (msg.doneAt !== null) {
+              return (
+                <SealedUserBubble key={msg.id} textEs={msg.result.local_version_es} />
+              );
+            }
             return (
               <UserBubble
                 key={msg.id}

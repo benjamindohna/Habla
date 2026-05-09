@@ -145,19 +145,6 @@ For now (no signup), `npm run warm` is run manually. After this backlog item is 
 
 ---
 
-## Collapse user-turn correction view on Done; show as sealed bubble
-
-**Trigger:** Phase 6 / 7 (chat shell + turn loop)
-**Status:** UX refinement, deferred
-
-When the user clicks **Done** on their correction box, the whole correction UI (interpretation line + segment chips + tap-to-explain panel + Done button) should **collapse / disappear**. In its place, the user's turn should render as a **clean, sealed speech bubble** — Spanish-only, just `local_version_es`, mirroring the visual style of the AI bubble but right-aligned. The conversation should look like a real chat once a turn is "finished".
-
-- No animation needed initially; just swap the rich correction view for the closed bubble on Done.
-- The full correction is still in the DB (`messages.segments_json`) — could be re-expandable later via a small "review correction" affordance on the bubble. Out of scope for this initial pass.
-- The latest unfinished user turn keeps its full correction view. Earlier user turns are all sealed bubbles.
-
----
-
 ## Tap-to-translate visual polish
 
 **Trigger:** Phase 8 (tap-to-translate on AI bubbles)
