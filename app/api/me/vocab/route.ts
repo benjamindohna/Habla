@@ -67,10 +67,10 @@ export async function GET() {
     .prepare(
       `SELECT id, target_word_original, target_word_lower, english_description,
               context_sentence, stage, next_due_at, correct_streak, lapses,
-              looked_up, last_seen, created_at
+              looked_up, last_seen, created_at, relevance_rank
        FROM user_vocab
        WHERE user_id = ?
-       ORDER BY id DESC`,
+       ORDER BY relevance_rank ASC, id ASC`,
     )
     .all(session.userId);
   return NextResponse.json({ rows });

@@ -15,6 +15,7 @@ interface Row {
   looked_up: number;
   last_seen: number;
   created_at: number;
+  relevance_rank: number;
 }
 
 const POLL_MS = 2000;
@@ -109,9 +110,10 @@ export default function VocabLivePage() {
         <header className="space-y-1">
           <h1 className="text-xl font-semibold tracking-tight">Vocab Live</h1>
           <p className="text-sm text-neutral-500">
-            Auto-polls every {POLL_MS / 1000}s. New rows pulse green for {HIGHLIGHT_MS / 1000}s
-            when they appear. Open this page in one tab and tap words in a chat in another to watch
-            saves land in real time.
+            Sorted by personalised relevance — most fundamental Spanish words first. Auto-polls
+            every {POLL_MS / 1000}s; new rows pulse green for {HIGHLIGHT_MS / 1000}s when they
+            land. Ranks shift as new words come in (bulk re-sort up to 15 entries, 3-anchor binary
+            insert above).
           </p>
         </header>
 
@@ -161,13 +163,16 @@ export default function VocabLivePage() {
                     (isNew ? "bg-emerald-50" : "bg-white")
                   }
                 >
+                  <span className="text-xs font-mono text-neutral-400 w-6 text-right tabular-nums shrink-0 pt-1">
+                    {r.relevance_rank + 1}.
+                  </span>
                   <div className="flex-1 min-w-0 space-y-0.5">
                     <div className="flex items-baseline gap-2 flex-wrap">
                       <span className="text-base font-medium text-neutral-900">
                         {r.target_word_original}
                       </span>
                       <span className="text-xs text-neutral-400">
-                        ({r.target_word_lower}) · stage {r.stage} · #{r.id}
+                        stage {r.stage} · #{r.id}
                       </span>
                       {isNew && (
                         <span className="text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-100 rounded px-1.5 py-0.5">

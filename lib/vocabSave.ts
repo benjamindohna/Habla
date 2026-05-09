@@ -17,6 +17,7 @@
 
 import { getDb } from "./db";
 import { compareVocabDescriptions, generateVocabDescription, normalizeVocab } from "./vocab";
+import { rerankAfterInsert } from "./vocabRanking";
 import { DEFAULT_TARGET } from "./targetLanguage";
 
 export interface SaveVocabArgs {
@@ -86,9 +87,11 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(args.userId, original, lower, description, args.context_sentence);
+    const rowId = Number(result.lastInsertRowid);
+    await rerankAfterInsert(args.userId, rowId);
     return {
       action: "inserted",
-      rowId: Number(result.lastInsertRowid),
+      rowId,
       description,
     };
   }
@@ -102,6 +105,7 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
 
   if (synonymIndex >= 0 && synonymIndex < existing.length) {
     // Synonym hit — discard the new entry, soft-lapse the matched row.
+    // No rank change needed: the merged-into row keeps its rank.
     const matched = existing[synonymIndex];
     softLapseIfDue(args.userId, matched.id);
     return {
@@ -119,9 +123,11 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
        VALUES (?, ?, ?, ?, ?)`,
     )
     .run(args.userId, original, lower, description, args.context_sentence);
+  const rowId = Number(result.lastInsertRowid);
+  await rerankAfterInsert(args.userId, rowId);
   return {
     action: "polysemy_inserted",
-    rowId: Number(result.lastInsertRowid),
+    rowId,
     description,
     siblingRowIds: existing.map((r) => r.id),
   };
