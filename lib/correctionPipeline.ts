@@ -4,7 +4,7 @@
 // extra HTTP hop. Each function is self-contained: same input shape +
 // nativeLanguage/style produces the same output.
 
-import { chatJSON } from "./llm";
+import { chatJSON, type ChatTask } from "./llm";
 import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
 import type { Pair } from "@/types/correction";
 
@@ -102,6 +102,10 @@ export async function localize(args: {
   transcript?: string;
   nativeLanguage: string;
   style: CorrectionStyle;
+  /** Override the model tier. Defaults to chat_precise (gpt-4o) for
+   *  production correctness. The /playground/correct-test page passes
+   *  chat_light so we can A/B compare quality on the cheaper tier. */
+  task?: ChatTask;
 }): Promise<string> {
   const useTranscript = args.style === "transcript_aware" && args.transcript?.trim();
   const systemPrompt = useTranscript
@@ -111,9 +115,10 @@ export async function localize(args: {
     ? `TRANSCRIPT: "${args.transcript!.trim()}"\nINTENT: "${args.intendedMeaning}"`
     : args.intendedMeaning;
 
+  const task = args.task ?? "chat_precise";
   const result = await chatJSON<{ local_version_es?: string }>({
-    task: "chat_precise",
-    label: "localize",
+    task,
+    label: `localize/${task}`,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent },
@@ -278,10 +283,13 @@ export async function segment(args: {
   transcript: string;
   localVersionEs: string;
   nativeLanguage: string;
+  /** Override the model tier (see localize). */
+  task?: ChatTask;
 }): Promise<Pair[]> {
+  const task = args.task ?? "chat_precise";
   const { pairs } = await chatJSON<{ pairs: Pair[] }>({
-    task: "chat_precise",
-    label: "segment",
+    task,
+    label: `segment/${task}`,
     userPrompt: segmentPrompt(args.nativeLanguage, args.localVersionEs, args.transcript),
   });
   const normalized = normalizePairs(pairs);

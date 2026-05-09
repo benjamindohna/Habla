@@ -45,6 +45,7 @@ export default function CorrectTestPage() {
         overrideIntendedMeaning: args.overrideIntendedMeaning,
         nativeLanguage: me.nativeLanguage,
         style: me.correctionStyle,
+        useMini: true,
       }),
     });
     if (!res.ok) {
@@ -129,6 +130,9 @@ export default function CorrectTestPage() {
             (interpret → localize → segment) and render a user-bubble like the chat would. Per-segment
             explanations on click. No Done button — this is read-only for inspection.
           </p>
+          <p className="text-xs text-amber-600">
+            ⚡ Forced to gpt-4o-mini for localize / segment / explain. Production chat keeps gpt-4o.
+          </p>
           {me && (
             <p className="text-xs text-neutral-400">
               Using your profile: native={me.nativeLanguage} · style={me.correctionStyle}
@@ -207,6 +211,7 @@ function BubbleSlot({
       showDone={false}
       onDone={() => {}}
       onReCorrect={onReCorrect}
+      useMini
     />
   );
 }

@@ -30,21 +30,29 @@ Rules for your response:
 
 export async function POST(req: NextRequest) {
   try {
-    const { localVersionEs, localSegment, userSegment, nativeLanguage = "German" } =
-      (await req.json()) as {
-        localVersionEs: string;
-        localSegment: string;
-        userSegment: string;
-        nativeLanguage?: string;
-      };
+    const {
+      localVersionEs,
+      localSegment,
+      userSegment,
+      nativeLanguage = "German",
+      useMini = false,
+    } = (await req.json()) as {
+      localVersionEs: string;
+      localSegment: string;
+      userSegment: string;
+      nativeLanguage?: string;
+      /** Test-only flag from /playground/correct-test: forces chat_light. */
+      useMini?: boolean;
+    };
 
     if (!localVersionEs || !localSegment) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    const task = useMini === true ? "chat_light" : "chat_precise";
     const explanation = await chatText({
-      task: "chat_precise",
-      label: "explain",
+      task,
+      label: `explain/${task}`,
       userPrompt: buildPrompt(localVersionEs, localSegment, userSegment, nativeLanguage),
       temperature: 0.4,
       maxTokens: 250,

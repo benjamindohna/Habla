@@ -6,9 +6,15 @@ import type { CorrectionResult, Pair } from "@/types/correction";
 interface CorrectionBlockProps {
   result: CorrectionResult;
   nativeLanguage: string;
+  /** Test-only: force /api/explain to use chat_light. Default false. */
+  useMini?: boolean;
 }
 
-export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBlockProps) {
+export default function CorrectionBlock({
+  result,
+  nativeLanguage,
+  useMini = false,
+}: CorrectionBlockProps) {
   const [selectedPair, setSelectedPair] = useState<Pair | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
@@ -88,6 +94,7 @@ export default function CorrectionBlock({ result, nativeLanguage }: CorrectionBl
           localSegment: pair.local_segment,
           userSegment: pair.user_segment,
           nativeLanguage,
+          useMini,
         }),
       });
       const data = await res.json();

@@ -26,6 +26,10 @@ export async function POST(req: NextRequest) {
     overrideIntendedMeaning?: string;
     nativeLanguage?: string;
     style?: CorrectionStyle;
+    /** Test-only flag from /playground/correct-test: forces chat_light
+     *  (gpt-4o-mini) for localize + segment. Default false → keep
+     *  production behaviour (chat_precise). */
+    useMini?: boolean;
   };
 
   const transcript = body.transcript?.trim();
@@ -35,6 +39,7 @@ export async function POST(req: NextRequest) {
   const nativeLanguage = body.nativeLanguage?.trim() || "German";
   const style: CorrectionStyle = body.style === "transcript_aware" ? "transcript_aware" : "natural";
   const override = body.overrideIntendedMeaning?.trim();
+  const task = body.useMini === true ? "chat_light" : "chat_precise";
 
   try {
     const interpretation = override
@@ -46,12 +51,14 @@ export async function POST(req: NextRequest) {
       transcript,
       nativeLanguage,
       style,
+      task,
     });
 
     const pairs = await segment({
       transcript,
       localVersionEs: local_version_es,
       nativeLanguage,
+      task,
     });
 
     const result: CorrectionResult = {
