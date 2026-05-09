@@ -470,6 +470,30 @@ Implementation thoughts:
 
 Mute toggle in settings is mandatory — many learners study in shared spaces or want their own music. But default-on is fine because it's so much of the atmospheric draw.
 
+### Outcome tiers — perfect-clear / close-call / fail
+
+Three distinct end-states per encounter, each with its own emotional arc and reward weight. Same level can produce all three depending on play quality.
+
+**Tier S — Perfect clear**
+- The NPC's tension counter never moves beyond the default warm state. Zero mistakes, or at most one tiny slip the character barely registered.
+- The whole encounter feels smooth, friendly, mutually pleasant.
+- Reward: a **perfect-clear badge** specific to this NPC / location. Collectible across the whole map. Plus the standard XP + coins.
+- Profile flex: collect all perfect-clear badges in a region (or all on the entire map) → meta-badge that appears prominently on the user's profile. Aspirational long-term goal for completionist players.
+
+**Tier A — Close call, recovered**
+- The NPC went grim somewhere in the middle. Tension counter climbed into "critical" territory. The death sentence felt close — but the user pulled it back.
+- Crucially: at the end of the encounter, the character **recovers warmth**. The abuelo, who looked disappointed three minutes ago, smiles at parting and says *„¡muy bien, hijo, espero que sigas aprendiendo! Que tengas un buen día"*. The mother, who looked worried, takes her baby back with a *„gracias, eres muy amable, perdona la prisa"* — sincere, even if relieved.
+- The user feels genuine **Erleichterung** — that closeness-of-loss made the warm ending land hard.
+- Reward: standard XP + coins, level checkmark. No perfect-clear badge. The reward you walk away with is the relief itself.
+
+**Tier F — Failed**
+- Death sentence triggered. Full red-monster animation, music spike, retry screen.
+- No reward, no progress on that level. Map state unchanged.
+
+The pedagogical effect: Tier A is **emotionally satisfying enough to feel like a real win** for casual players who're learning slowly — they passed, they got the warm goodbye, that's enough. But Tier S is the *truly* satisfying outcome that completionists chase, and chasing it means studying hard enough to never let the tension counter rise. Tier-S completionism is what drives the kind of practice that produces actual fluency.
+
+The system needs only a small set of LLM-generated farewell lines per character, parameterised by the tier. The character's exit lines, like their mid-encounter lines, take the tension state as input and respond accordingly — warm at S, relieved-grateful at A, transformed-cynical at F.
+
 ### Progression and reward economy
 
 XP system:
