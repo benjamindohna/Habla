@@ -162,9 +162,6 @@ export interface JudgeArgs {
   target_word: string;
   /** The English sense-key for the row being tested. */
   tested_description: string;
-  /** English sense-keys of OTHER rows for the same target_word_lower in
-   *  this learner's vocab list. Empty array if monosemous. */
-  other_descriptions: string[];
   /** The learner's typed/spoken answer in their native language. */
   user_answer: string;
   /** e.g. "Spanish". */
@@ -177,28 +174,35 @@ export interface JudgeArgs {
  * Decide whether the learner's answer is an acceptable native-language
  * translation of the tested sense.
  *
- * Robust to:
- *  - missing/extra articles, capitalisation, minor typos
- *  - synonymous wording
- *  - prompt-injection attempts (output range is constrained to 1/X/0)
+ * Three-bucket output:
+ *  - "1": answer matches the tested sense (or is ambiguous and could plausibly mean it)
+ *  - "X": answer unambiguously refers to a DIFFERENT sense of the same word
+ *  - "0": answer is wrong, empty, or just echoes the target word
+ *
+ * The LLM uses its own linguistic knowledge of the target language to
+ * recognise alternative meanings — we no longer pass other senses from
+ * the user's stored vocab. This means a user who knows "banco" can
+ * also mean "Geldinstitut" (without having that as a stored row) gets
+ * the X→retry treatment instead of an immediate 0.
  *
  * Conservative parsing: if the model output doesn't contain 1/X/0,
  * defaults to "0" (lapse). False rejects are reparable next review;
  * accepting garbage would corrupt SRS state.
+ *
+ * Three-strikes UX (handled in the frontend, server is stateless across
+ * attempts): on first X, show "Diese Übersetzung ist korrekt, aber wir
+ * suchen nach einer anderen." On second X, show "Kannst du nach noch
+ * einer weiteren Übersetzung für ${word} denken?" On third X, mark the
+ * card as failed with "Du hast leider nicht die Übersetzung getroffen,
+ * nach der wir gesucht haben."
  */
 export async function judgeVocabAnswer(args: JudgeArgs): Promise<VocabJudgement> {
-  const others =
-    args.other_descriptions.length > 0
-      ? `[${args.other_descriptions.map((s) => `"${s}"`).join(", ")}]`
-      : "(none)";
-
   const prompt = `You are evaluating a vocabulary review answer for a language learner.
 The learner is studying ${args.target_language}; their native language is ${args.native_language}.
 
 You receive:
 - A ${args.target_language} word being tested.
 - The SENSE of this word being tested, described in English.
-- Other known senses of the same word in this learner's vocab list (may be empty).
 - The learner's answer in ${args.native_language}.
 
 Decide whether the learner's answer is an acceptable ${args.native_language} translation of the TESTED sense.
@@ -209,6 +213,7 @@ Be LENIENT on:
 - minor typos ("Sitzbqnk" → accept as "Sitzbank")
 - capitalisation
 - minor inflection differences (singular ≈ plural if the sense is the same)
+- AMBIGUOUS answers that could plausibly mean the tested sense — accept (return 1), even if they could also mean something else.
 
 Be STRICT on:
 - actual meaning mismatch
@@ -217,35 +222,38 @@ Be STRICT on:
 - answers in the wrong language
 
 Output exactly ONE character, no other text:
-- 1  the answer matches the TESTED sense
-- X  the answer does NOT match the tested sense, but DOES match one of the listed other senses (only possible if other senses are listed)
+- 1  the answer matches the TESTED sense, OR is ambiguous and could plausibly refer to the tested sense
+- X  the answer UNAMBIGUOUSLY refers to a DIFFERENT sense of "${args.target_word}" — use your own linguistic knowledge of ${args.target_language} to recognise alternative meanings; you are NOT given a list of other known senses. Reserve X for answers that can ONLY mean a different sense, never for answers that could plausibly mean the tested sense.
 - 0  the answer is wrong, empty, or just echoes the target word
 
 Examples (target Spanish, native German):
 
 Tested word: "banco" — sense: "long bench to sit on"
-Other senses: ["financial institution"]
   "Sitzbank"           → 1
+  "Bank"               → 1   (ambiguous — Bank can mean Sitzbank OR Geldinstitut, accept)
   "die Sitzbank"       → 1   (extra article, accept)
   "sitzbank"           → 1   (lowercase, accept)
   "Sitzbqnk"           → 1   (minor typo, accept)
   "Bank zum Sitzen"    → 1   (synonym phrasing, accept)
-  "Bank"               → X   (matches the other sense)
-  "Geldinstitut"       → X   (synonym of the other sense)
+  "Geldinstitut"       → X   (unambiguously the financial-bank sense, valid alt meaning)
+  "Finanzinstitut"     → X   (unambiguously the financial-bank sense)
   "Schrank"            → 0   (unrelated)
   ""                   → 0   (empty)
   "banco"              → 0   (just echoed the target word)
 
 Tested word: "comer" — sense: "to eat (food, meal)"
-Other senses: (none)
   "essen"              → 1
   "fressen"            → 1   (register-different synonym, accept)
   "isst"               → 1   (different inflection, same meaning, accept)
   "trinken"            → 0   (different meaning)
   "comer"              → 0   (echoed target word)
 
+Tested word: "fuego" — sense: "literal fire / flame"
+  "Feuer"              → 1
+  "Leidenschaft"       → X   (unambiguously the passion / inner-fire sense, valid alt meaning)
+  "Schrank"            → 0   (unrelated)
+
 Tested word: "haya impresionado" — sense: "has impressed (subjunctive perfect)"
-Other senses: (none)
   "hat beeindruckt"    → 1
   "beeindruckt hat"    → 1   (different word order, same meaning, accept)
   "beeindrucken"       → 0   (infinitive, doesn't carry the perfect aspect)
@@ -254,7 +262,6 @@ Now evaluate.
 
 Tested word: "${args.target_word}"
 Sense being tested: "${args.tested_description}"
-Other known senses: ${others}
 Learner's answer: "${args.user_answer}"
 
 Reply with exactly one character: 1, X, or 0. No explanation, no punctuation, no quotes.`;
