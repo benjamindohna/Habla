@@ -12,6 +12,7 @@
 // save flow is wired; kept now so the existing tests stay green.
 
 import { chatText } from "./llm";
+import { markWordOccurrence } from "./aiBubblePipeline";
 
 /**
  * Standard normalisation. Always applied as the very first pass. Steps:
@@ -57,6 +58,14 @@ export interface DescribeWordArgs {
    *  if AI replies grow long the caller can window this to ~16 words
    *  before/after the tapped word. */
   context_sentence: string;
+  /** Optional 0-based word index of the originally-tapped word inside
+   *  context_sentence (using the shared WORD_REGEX). When provided, the
+   *  prompt wraps that occurrence with «…» so the LLM knows exactly
+   *  which instance of the word the learner means — defends against the
+   *  case where the same word appears twice in the sentence with
+   *  different senses. Optional because /playground/save-test users
+   *  type the segment and context manually with no index. */
+  tapped_word_index?: number;
   /** e.g. "Spanish". */
   target_language: string;
   /** e.g. "German". Used as a frame-setting hint, not as a translation
@@ -75,6 +84,11 @@ export interface DescribeWordArgs {
  * collapse and polysemy separation.
  */
 export async function generateVocabDescription(args: DescribeWordArgs): Promise<string> {
+  const context =
+    typeof args.tapped_word_index === "number" && args.tapped_word_index >= 0
+      ? markWordOccurrence(args.context_sentence, args.tapped_word_index)
+      : args.context_sentence;
+
   const prompt = `You are generating a sense-key for a vocabulary entry. The learner is studying ${args.target_language}; their native language is ${args.native_language}. They have just tapped a word in a ${args.target_language} sentence.
 
 Write a SHORT English description (3-7 words) of the SPECIFIC SENSE the tapped word has in this sentence. The description is used as a sense-key: it must be precise enough that two genuinely different meanings of the same word produce noticeably different descriptions, but generic enough that two synonymous translations of the same meaning produce IDENTICAL descriptions.
@@ -83,21 +97,25 @@ Rules:
 - 3 to 7 words. No leading article. No trailing period.
 - Describe the meaning, not the form (do not write tense / number).
 - Be neutral about register / dialect.
+- The context may wrap the tapped word in «guillemets» — that marks exactly which occurrence the learner tapped (the same word may appear multiple times in different senses). Use that marker to disambiguate.
 
 Worked examples:
-  "banco" in "el banco está cerrado los domingos"        → "financial institution"
-  "banco" in "me senté en el banco del parque"           → "long bench to sit on"
-  "fuego" in "encendió el fuego en la chimenea"          → "literal fire / flame"
-  "fuego" in "siento un fuego dentro al verla"           → "passionate intensity / inner fire"
-  "hoja" in "la hoja se cayó del árbol en otoño"         → "leaf of a plant"
-  "hoja" in "necesito una hoja de papel"                 → "sheet of paper"
-  "hoja" in "la hoja del cuchillo está afilada"          → "blade of a cutting tool"
-  "comer" in "vamos a comer pasta"                       → "to eat (food, meal)"
-  "Madrid" in "vivo en Madrid desde hace cinco años"     → "Madrid (city, capital of Spain)"
-  "Coca-Cola" in "una Coca-Cola fría"                    → "Coca-Cola (the soft drink brand)"
+  "banco" in "el «banco» está cerrado los domingos"          → "financial institution"
+  "banco" in "me senté en el «banco» del parque"             → "long bench to sit on"
+  "fuego" in "encendió el «fuego» en la chimenea"            → "literal fire / flame"
+  "fuego" in "siento un «fuego» dentro al verla"             → "passionate intensity / inner fire"
+  "hoja" in "la «hoja» se cayó del árbol en otoño"           → "leaf of a plant"
+  "hoja" in "necesito una «hoja» de papel"                   → "sheet of paper"
+  "hoja" in "la «hoja» del cuchillo está afilada"            → "blade of a cutting tool"
+  "comer" in "vamos a «comer» pasta"                         → "to eat (food, meal)"
+  "Madrid" in "vivo en «Madrid» desde hace cinco años"       → "Madrid (city, capital of Spain)"
+  "Coca-Cola" in "una «Coca-Cola» fría"                      → "Coca-Cola (the soft drink brand)"
+  Multi-word segment example:
+  "te haya impresionado" in "un partido que te «haya» impresionado" → "has impressed (subjunctive perfect)"
+  (Here the tapped word is just "haya" but the segment to describe is the whole compound tense.)
 
 Word: "${args.target_word}"
-Context: "${args.context_sentence}"
+Context: "${context}"
 
 Return ONLY the description string. No JSON, no quotes, no explanation.`;
 

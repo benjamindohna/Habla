@@ -153,7 +153,11 @@ export default function AIBubble({
           fetch("/api/me/vocab", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ segment: result.segment, context: text }),
+            body: JSON.stringify({
+              segment: result.segment,
+              context: text,
+              wordIndex: token.wordIndex,
+            }),
           }).catch(() => {});
         }
       })

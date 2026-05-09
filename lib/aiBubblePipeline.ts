@@ -64,7 +64,7 @@ export const WORD_REGEX = /[\p{L}][\p{L}\p{M}'-]*/gu;
  * disambiguate repeated words (e.g. "el libro y el cuaderno" — which
  * "el" did the learner tap?).
  */
-function markWordOccurrence(sentence: string, wordIndex: number): string {
+export function markWordOccurrence(sentence: string, wordIndex: number): string {
   let i = 0;
   const re = new RegExp(WORD_REGEX.source, WORD_REGEX.flags);
   return sentence.replace(re, (match) => {

@@ -27,6 +27,10 @@ export interface SaveVocabArgs {
   /** The AI message the segment was tapped in. Used as context for
    *  description generation and stored on the row for audit. */
   context_sentence: string;
+  /** Optional 0-based word index of the originally-tapped word in
+   *  context_sentence. When provided, the description-generator marks
+   *  that occurrence with «…» to disambiguate repeated words. */
+  tapped_word_index?: number;
   /** User's native language (for the description generator's framing
    *  prompt — the description itself is always English). */
   native_language: string;
@@ -56,6 +60,7 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
   const description = await generateVocabDescription({
     target_word: original,
     context_sentence: args.context_sentence,
+    tapped_word_index: args.tapped_word_index,
     target_language: DEFAULT_TARGET.language,
     native_language: args.native_language,
   });

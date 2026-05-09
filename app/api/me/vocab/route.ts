@@ -27,9 +27,14 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
     segment?: unknown;
     context?: unknown;
+    wordIndex?: unknown;
   };
   const segment = typeof body.segment === "string" ? body.segment.trim() : "";
   const context = typeof body.context === "string" ? body.context.trim() : "";
+  const wordIndex =
+    typeof body.wordIndex === "number" && Number.isInteger(body.wordIndex) && body.wordIndex >= 0
+      ? body.wordIndex
+      : undefined;
   if (!segment || !context) {
     return NextResponse.json({ error: "segment and context required" }, { status: 400 });
   }
@@ -39,6 +44,7 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       segment,
       context_sentence: context,
+      tapped_word_index: wordIndex,
       native_language: user.nativeLanguage,
     });
     return NextResponse.json(result);
