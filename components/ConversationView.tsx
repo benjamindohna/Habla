@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import AudioRecorder from "./AudioRecorder";
 import AIBubble from "./AIBubble";
-import type { Segment } from "@/types/segment";
 import UserBubble from "./UserBubble";
 import type { CorrectionResult } from "@/types/correction";
 
@@ -18,7 +17,7 @@ interface ConversationViewProps {
 }
 
 type Message =
-  | { id: string; role: "ai"; text?: string; segments?: Segment[] | null; muted?: boolean; loading?: boolean }
+  | { id: string; role: "ai"; text?: string; muted?: boolean; loading?: boolean }
   | { id: string; role: "user"; result: CorrectionResult; doneAt: number | null };
 
 type PendingStatus =
@@ -79,13 +78,13 @@ export default function ConversationView({
       body: JSON.stringify({ topic }),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load opener"))))
-      .then((data: { conversationId: number; text: string; segments?: Segment[] | null }) => {
+      .then((data: { conversationId: number; text: string }) => {
         if (cancelled) return;
         setConversationId(data.conversationId);
         setMessages((prev) =>
           prev.map((m) =>
             m.id === openerIdRef.current && m.role === "ai"
-              ? { ...m, text: data.text, segments: data.segments ?? null, loading: false }
+              ? { ...m, text: data.text, loading: false }
               : m,
           ),
         );
@@ -185,11 +184,11 @@ export default function ConversationView({
         }),
       });
       if (!res.ok) throw new Error("Reply failed");
-      const data = (await res.json()) as { text: string; segments?: Segment[] | null };
+      const data = (await res.json()) as { text: string };
       setMessages((prev) =>
         prev.map((m) =>
           m.id === loadingId && m.role === "ai"
-            ? { ...m, text: data.text, segments: data.segments ?? null, loading: false }
+            ? { ...m, text: data.text, loading: false }
             : m,
         ),
       );
@@ -254,7 +253,6 @@ export default function ConversationView({
               <AIBubble
                 key={msg.id}
                 text={msg.text}
-                segments={msg.segments}
                 muted={msg.muted}
                 loading={msg.loading}
               />

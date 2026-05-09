@@ -1,31 +1,17 @@
-// Pipeline helpers for AI-bubble text generation and tap-to-translate.
-// Two architectures live here side-by-side so we can compare them in the
-// playground without touching the production /api/converse/* routes.
+// Pipeline helpers for AI-bubble text generation and on-tap word lookup.
 //
-// Shared:
-//   generateAIOpener — produce only the AI's text. No segmentation, no
-//   translation. Cheap, single focus. Used by both architectures.
+// generateAIOpener — produce only the AI's text. Used by the playground
+//   message generator; production uses /api/converse/start directly.
 //
-// Architecture 1 — upfront segment + align (one big Call B):
-//   segmentAndAlign — take the generated text, produce a full idiomatic
-//   native translation, then segment the target text and align each
-//   segment to a fragment of that translation.
-//   generateAndSegmentOpener — orchestrator: generateAIOpener → segmentAndAlign.
-//   Pros: instant tap (everything pre-translated). Cons: every word's
-//   translation generated whether tapped or not; one heavy prompt mixing
-//   tasks.
-//
-// Architecture 2 — on-tap, per-word translate (lazy):
-//   translateWordInContext — fired only when the user taps a specific
-//   word. Inputs: full sentence + tapped word (occurrence marked).
-//   Outputs: the contextual segment (word alone, or multi-word unit if
-//   it belongs to one) plus the contextually-correct native translation.
-//   Pros: only translate what's actually looked up; each call laser-focused.
-//   Cons: ~1-2s latency per first tap on a word.
+// translateWordInContext — fires when the user taps a word. Inputs:
+//   full sentence + tapped word (occurrence marked). Outputs: the
+//   contextual segment (word alone, or multi-word unit if it belongs to
+//   one) plus the contextually-correct native translation, plus the
+//   indices of the words that constitute the segment for client-side
+//   caching.
 
 import { chatJSON, chatText, type ChatTask } from "./llm";
 import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
-import type { Segment } from "@/types/segment";
 
 // ── Shared: Call A — text only ───────────────────────────────────────────
 
@@ -62,128 +48,7 @@ Return ONLY the message text in ${targetName}. No JSON, no quotes, no preamble, 
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Architecture 1 — upfront segment + align
-// ─────────────────────────────────────────────────────────────────────────
-
-export interface AIBubblePipelineResult {
-  text: string;
-  native_translation: string;
-  segments: Segment[];
-}
-
-export async function segmentAndAlign(args: {
-  text: string;
-  nativeLanguage: string;
-}): Promise<{ native_translation: string; segments: Segment[] }> {
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
-
-  const prompt = `You are a translation-and-alignment engine for language learning. The learner is studying ${target}; their native language is ${args.nativeLanguage}.
-
-You receive ONE message in ${targetName}. Do BOTH:
-
-1. Produce a complete idiomatic ${args.nativeLanguage} translation of the message — how a native ${args.nativeLanguage} speaker would actually phrase it, not a word-for-word translation. Preserve every clause and nuance.
-
-2. Segment the ${targetName} message and align each segment to its corresponding fragment of your ${args.nativeLanguage} translation. The ${args.nativeLanguage} fragments may appear in a different word order than the ${targetName} segments — that is fine; alignment is by meaning, not position.
-
-HOW TO SEGMENT
-- Each segment is either: a single content word (verb, noun, adjective, …), a single function word (article, preposition, conjunction), a multi-word unit that MUST stay together, or punctuation.
-- Multi-word units that MUST stay together as ONE segment:
-  • Compound tenses: haber + past participle (he visto, había dicho, haya impresionado), estar + gerund (está hablando), ir a + infinitive (voy a hacer), modal periphrases (tener que ir, hay que hacerlo).
-  • Idioms / fixed expressions: tener ganas, darse cuenta, echar de menos, por ejemplo, en cambio, sin embargo.
-  • Multi-word named entities: Estados Unidos, Real Madrid, América Latina.
-- Inverted question/exclamation marks (¿, ¡) and other punctuation are their OWN segments with NO native field.
-- Whitespace between segments does not need its own segment — the renderer handles spacing. But if you need to keep an internal space (e.g. inside a multi-word segment), include it in the "es" string.
-- The concatenation of all "es" fields, joined back in order, MUST exactly reconstruct the input (modulo whitespace between segments).
-
-HOW TO ALIGN
-- For each ${targetName} segment, take the corresponding fragment of your ${args.nativeLanguage} translation. Use the SAME grammatical form as it appears in the translation — do NOT lemmatise, do NOT normalise.
-- Multi-word ${targetName} segments map to whatever ${args.nativeLanguage} fragment expresses the same meaning, even if it is also multiple words ("te haya impresionado" → "dich beeindruckt hat").
-- Some ${targetName} segments may have no direct ${args.nativeLanguage} counterpart (pro-drop subjects, expletive pronouns). Leave their "native" empty in that case.
-- Punctuation segments have NO native field at all (omit it, do not pass an empty string).
-
-WORKED EXAMPLE (target Spanish, native German)
-
-Target: "¿Tienes algún diseño que te haya impresionado?"
-Native translation: "Hast du ein Design, das dich beeindruckt hat?"
-Segments:
-  { "es": "¿" }
-  { "es": "Tienes", "native": "Hast du" }
-  { "es": "algún", "native": "ein" }
-  { "es": "diseño", "native": "Design" }
-  { "es": "que", "native": "das" }
-  { "es": "te haya impresionado", "native": "dich beeindruckt hat" }
-  { "es": "?" }
-
-WORKED EXAMPLE (idiom)
-
-Target: "No tengo ganas de salir esta noche."
-Native translation: "Ich habe heute Abend keine Lust auszugehen."
-Segments:
-  { "es": "No", "native": "keine" }
-  { "es": "tengo ganas", "native": "habe Lust" }
-  { "es": "de", "native": "zu" }
-  { "es": "salir", "native": "ausgehen" }
-  { "es": "esta noche", "native": "heute Abend" }
-  { "es": "." }
-
-Now process the actual input.
-
-${targetName} message:
-"${args.text}"
-
-Return ONLY valid JSON:
-{
-  "native_translation": "<full idiomatic ${args.nativeLanguage} translation>",
-  "segments": [
-    { "es": "<target segment>", "native": "<corresponding ${args.nativeLanguage} fragment>" },
-    { "es": "<punctuation>" }
-  ]
-}`;
-
-  const parsed = await chatJSON<{
-    native_translation?: unknown;
-    segments?: unknown;
-  }>({
-    task: "chat_light",
-    label: "playground/segmentB",
-    systemPrompt: prompt,
-    temperature: 0.2,
-  });
-
-  const native_translation =
-    typeof parsed.native_translation === "string" ? parsed.native_translation.trim() : "";
-
-  const segments: Segment[] = Array.isArray(parsed.segments)
-    ? (parsed.segments as Array<{ es?: unknown; native?: unknown }>)
-        .filter((s) => s != null && typeof s.es === "string")
-        .map((s) => {
-          const out: Segment = { es: s.es as string };
-          if (typeof s.native === "string" && s.native.trim()) {
-            out.native = s.native.trim();
-          }
-          return out;
-        })
-    : [];
-
-  return { native_translation, segments };
-}
-
-export async function generateAndSegmentOpener(args: {
-  topic: string;
-  level: number;
-  nativeLanguage: string;
-}): Promise<AIBubblePipelineResult> {
-  const text = await generateAIOpener(args);
-  const { native_translation, segments } = await segmentAndAlign({
-    text,
-    nativeLanguage: args.nativeLanguage,
-  });
-  return { text, native_translation, segments };
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Architecture 2 — on-tap per-word translate
+// On-tap per-word translate
 // ─────────────────────────────────────────────────────────────────────────
 
 /**

@@ -1,74 +1,75 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Segment } from "@/types/segment";
+import { useEffect, useRef, useState } from "react";
+import { WORD_REGEX } from "@/lib/aiBubblePipeline";
 
-/**
- * Defensive whitespace insertion. The LLM is supposed to emit non-tappable
- * whitespace segments between tappable ones, but it sometimes forgets and
- * delivers segments back-to-back with no spacing — which renders as one
- * compressed blob. We compensate by inserting an inert space wherever the
- * boundary between two segments needs one and doesn't have one.
- *
- * Rules at a segment boundary:
- *  - If either side already has whitespace → no insertion.
- *  - If previous ends with a "glue-after" char (¿ ¡ « " ' ( [ {) → no insertion.
- *  - If current starts with a "glue-before" char (, . ; : ! ? » " ' ) ] }) → no insertion.
- *  - Otherwise → insert a single space.
- */
-function withInferredSpaces(segments: Segment[]): Segment[] {
-  const GLUE_AFTER_PREV = /[¿¡«"'([{]/;
-  const GLUE_BEFORE_CURR = /[,.;:!?»"')\]}]/;
-  const out: Segment[] = [];
-  for (let i = 0; i < segments.length; i++) {
-    const curr = segments[i];
-    if (!curr.es) continue;
-    const prev = out[out.length - 1];
-    if (prev && prev.es && curr.es) {
-      const lastChar = prev.es.slice(-1);
-      const firstChar = curr.es[0];
-      const hasSpace = /\s/.test(lastChar) || /\s/.test(firstChar);
-      const glued = GLUE_AFTER_PREV.test(lastChar) || GLUE_BEFORE_CURR.test(firstChar);
-      if (!hasSpace && !glued) {
-        out.push({ es: " " });
-      }
+// ── Tokenisation ─────────────────────────────────────────────────────────
+
+type Token =
+  | { kind: "word"; text: string; wordIndex: number }
+  | { kind: "spacing"; text: string };
+
+function tokenize(text: string): Token[] {
+  const tokens: Token[] = [];
+  const re = new RegExp(WORD_REGEX.source, WORD_REGEX.flags);
+  let lastEnd = 0;
+  let wordIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > lastEnd) {
+      tokens.push({ kind: "spacing", text: text.slice(lastEnd, m.index) });
     }
-    out.push(curr);
+    tokens.push({ kind: "word", text: m[0], wordIndex: wordIndex++ });
+    lastEnd = m.index + m[0].length;
   }
-  return out;
+  if (lastEnd < text.length) {
+    tokens.push({ kind: "spacing", text: text.slice(lastEnd) });
+  }
+  return tokens;
 }
 
+// ── Lookup state ─────────────────────────────────────────────────────────
+
+interface LookupResult {
+  segment: string;
+  translation: string;
+  indices: number[];
+}
+
+type LookupState =
+  | { kind: "loading" }
+  | { kind: "done"; result: LookupResult }
+  | { kind: "error"; message: string };
+
+// ── Component ────────────────────────────────────────────────────────────
+
 interface AIBubbleProps {
+  /** The plain-text AI message. Required when not loading and not muted. */
   text?: string;
-  segments?: Segment[] | null;
   /** Optional muted styling — used for placeholder/error messages. */
   muted?: boolean;
   /** Show three-dot pulse instead of text — used while the message loads. */
   loading?: boolean;
-  /** Skip the fire-and-forget /api/me/words save on tap. Used by the
-   *  playground so test taps don't leak into the user's vocab list. */
+  /** Skip the fire-and-forget /api/me/vocab save on first tap. Used by
+   *  the playground so test taps don't pollute the user's vocab list. */
   disableSave?: boolean;
 }
 
 export default function AIBubble({
   text,
-  segments,
   muted = false,
   loading = false,
   disableSave = false,
 }: AIBubbleProps) {
-  // Index of the segment whose translation popover is currently open. null = none.
   const [openIndex, setOpenIndex] = useState<number | null>(null);
-  // Indexes of segments whose translation has been viewed at least once
-  // (persistent subtle marker so the user knows what they've already looked up).
-  const [lookedUp, setLookedUp] = useState<Set<number>>(new Set());
-
+  const [lookups, setLookups] = useState<Map<number, LookupState>>(new Map());
   const bubbleRef = useRef<HTMLDivElement>(null);
 
-  const renderedSegments = useMemo(
-    () => (segments && segments.length > 0 ? withInferredSpaces(segments) : null),
-    [segments],
-  );
+  // Reset lookup state when the bubble's text changes (new message, edit).
+  useEffect(() => {
+    setOpenIndex(null);
+    setLookups(new Map());
+  }, [text]);
 
   // Click-outside closes the open popover.
   useEffect(() => {
@@ -80,61 +81,104 @@ export default function AIBubble({
     return () => document.removeEventListener("mousedown", onDown);
   }, [openIndex]);
 
-  function handleSegmentTap(index: number, seg: Segment) {
-    if (!seg.native) return;
-    // Toggle if it's already open.
-    if (openIndex === index) {
+  function handleWordTap(token: Extract<Token, { kind: "word" }>) {
+    if (!text) return;
+    if (openIndex === token.wordIndex) {
       setOpenIndex(null);
       return;
     }
-    setOpenIndex(index);
-    // First-time tap → fire-and-forget save to user_unknown_words.
-    if (!lookedUp.has(index)) {
-      setLookedUp((prev) => {
-        const next = new Set(prev);
-        next.add(index);
-        return next;
+    setOpenIndex(token.wordIndex);
+    if (lookups.has(token.wordIndex)) return; // cached
+
+    setLookups((prev) => {
+      const next = new Map(prev);
+      next.set(token.wordIndex, { kind: "loading" });
+      return next;
+    });
+
+    // Translate the tapped word in context. Same endpoint the playground
+    // uses; production reuses the proven pipeline.
+    fetch("/api/playground/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sentence: text,
+        word: token.text,
+        wordIndex: token.wordIndex,
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error || `HTTP ${res.status}`);
+        }
+        return res.json() as Promise<LookupResult>;
+      })
+      .then((result) => {
+        // Cache under every covered index so a later tap on a related
+        // word in the same segment returns the same answer instantly.
+        setLookups((prev) => {
+          const next = new Map(prev);
+          const state: LookupState = { kind: "done", result };
+          for (const idx of result.indices) next.set(idx, state);
+          return next;
+        });
+
+        // Fire-and-forget save to the user's vocab list. Skipped when
+        // disableSave is on (playground). The new save flow handles
+        // dedup and polysemy server-side.
+        if (!disableSave) {
+          fetch("/api/me/vocab", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              segment: result.segment,
+              context: text,
+            }),
+          }).catch(() => {
+            // Silent — failed save is non-blocking; user still sees translation.
+          });
+        }
+      })
+      .catch((err: Error) => {
+        setLookups((prev) => {
+          const next = new Map(prev);
+          next.set(token.wordIndex, { kind: "error", message: err.message });
+          return next;
+        });
       });
-      if (disableSave) return;
-      fetch("/api/me/words", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ word: seg.es, native: seg.native }),
-      }).catch(() => {
-        // Silent — failing here just means the word isn't saved this time.
-      });
-    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────
+
   const baseClasses = muted
     ? "max-w-[80%] rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 px-4 py-3 text-sm italic text-neutral-400"
     : "max-w-[80%] rounded-2xl bg-neutral-100 px-4 py-3 text-base leading-relaxed text-neutral-900";
+
+  const tokens = !loading && text ? tokenize(text) : null;
 
   return (
     <div className="flex justify-start">
       <div ref={bubbleRef} className={`${baseClasses} relative`}>
         {loading ? (
           <PulsingDots />
-        ) : renderedSegments ? (
+        ) : tokens ? (
           <span className="whitespace-pre-wrap">
-            {renderedSegments.map((seg, i) =>
-              seg.native ? (
-                <TappableSpan
-                  key={i}
-                  text={seg.es}
-                  native={seg.native}
-                  open={openIndex === i}
-                  lookedUp={lookedUp.has(i)}
-                  onTap={() => handleSegmentTap(i, seg)}
-                />
+            {tokens.map((tok, i) =>
+              tok.kind === "spacing" ? (
+                <span key={i}>{tok.text}</span>
               ) : (
-                <span key={i}>{seg.es}</span>
+                <WordButton
+                  key={i}
+                  token={tok}
+                  open={openIndex === tok.wordIndex}
+                  lookup={lookups.get(tok.wordIndex)}
+                  onTap={() => handleWordTap(tok)}
+                />
               ),
             )}
           </span>
         ) : (
-          // Fallback for messages without segments (legacy or stub).
           <span className="whitespace-pre-wrap">{text}</span>
         )}
       </div>
@@ -142,15 +186,20 @@ export default function AIBubble({
   );
 }
 
-interface TappableSpanProps {
-  text: string;
-  native: string;
-  open: boolean;
-  lookedUp: boolean;
-  onTap: () => void;
-}
+// ── Word button + popover ────────────────────────────────────────────────
 
-function TappableSpan({ text, native, open, lookedUp, onTap }: TappableSpanProps) {
+function WordButton({
+  token,
+  open,
+  lookup,
+  onTap,
+}: {
+  token: Extract<Token, { kind: "word" }>;
+  open: boolean;
+  lookup: LookupState | undefined;
+  onTap: () => void;
+}) {
+  const looked = lookup?.kind === "done";
   return (
     <span className="relative inline-block">
       <button
@@ -159,23 +208,57 @@ function TappableSpan({ text, native, open, lookedUp, onTap }: TappableSpanProps
           "cursor-pointer rounded transition-colors px-0.5 -mx-0.5 " +
           (open
             ? "bg-amber-100 text-neutral-900"
-            : lookedUp
+            : looked
             ? "underline decoration-dotted decoration-neutral-300 underline-offset-[3px] hover:bg-neutral-200"
             : "hover:bg-neutral-200")
         }
       >
-        {text}
+        {token.text}
       </button>
-      {open && (
-        <span
-          role="tooltip"
-          className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-10 whitespace-nowrap rounded-lg bg-neutral-900 text-white text-xs px-3 py-1.5 shadow-md"
-        >
-          {native}
-          <span
-            aria-hidden="true"
-            className="absolute left-1/2 -translate-x-1/2 top-full -mt-px w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-neutral-900"
-          />
+      {open && <Popover lookup={lookup} tappedWord={token.text} />}
+    </span>
+  );
+}
+
+function Popover({
+  lookup,
+  tappedWord,
+}: {
+  lookup: LookupState | undefined;
+  tappedWord: string;
+}) {
+  return (
+    <span
+      role="tooltip"
+      className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-10 rounded-lg bg-neutral-900 text-white text-xs px-3 py-2 shadow-md min-w-[140px] max-w-[280px]"
+    >
+      {!lookup || lookup.kind === "loading" ? (
+        <span className="inline-flex items-center gap-2">
+          <span className="block w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+          <span className="text-white/80">Übersetze…</span>
+        </span>
+      ) : lookup.kind === "error" ? (
+        <span className="text-red-300">{lookup.message}</span>
+      ) : (
+        <ResultBody result={lookup.result} tappedWord={tappedWord} />
+      )}
+      <span
+        aria-hidden="true"
+        className="absolute left-1/2 -translate-x-1/2 top-full -mt-px w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-neutral-900"
+      />
+    </span>
+  );
+}
+
+function ResultBody({ result, tappedWord }: { result: LookupResult; tappedWord: string }) {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const segmentDiffersFromTap = norm(result.segment) !== norm(tappedWord);
+  return (
+    <span className="block text-left leading-snug">
+      <span className="block whitespace-normal">{result.translation}</span>
+      {segmentDiffersFromTap && (
+        <span className="block text-[10px] text-white/60 mt-0.5 whitespace-normal">
+          {result.segment}
         </span>
       )}
     </span>
