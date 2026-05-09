@@ -54,7 +54,7 @@ export default function CorrectTestPage() {
         style: me.correctionStyle,
         localizeMini: localizeTier === "mini",
         segmentMini: segmentTier === "mini",
-        improvedSegmentPrompt: true,
+        improvedSegmentPrompt: false,
       }),
     });
     if (!res.ok) {
@@ -160,8 +160,8 @@ export default function CorrectTestPage() {
             previously-cached explanations remain.
           </p>
           <p className="text-[11px] text-amber-700">
-            ⚡ This page also forces the V2 segment prompt + V2 explain prompt (dynamic length).
-            Production chat keeps V1.
+            ⚡ This page forces the V2 explain prompt (dynamic length). Segment prompt is back on V1.
+            Production chat keeps V1 for both.
           </p>
         </div>
 
