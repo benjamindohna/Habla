@@ -230,7 +230,7 @@ function Popover({
   return (
     <span
       role="tooltip"
-      className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-10 rounded-lg bg-neutral-900 text-white text-xs px-3 py-2 shadow-md min-w-[140px] max-w-[280px]"
+      className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 rounded-lg bg-neutral-900 text-white text-xs px-3 py-2 shadow-md min-w-[140px] max-w-[280px]"
     >
       {!lookup || lookup.kind === "loading" ? (
         <span className="inline-flex items-center gap-2">

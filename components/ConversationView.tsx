@@ -223,7 +223,7 @@ export default function ConversationView({
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pt-24 pb-6">
         <div className="w-full max-w-3xl mx-auto space-y-6">
           {messages.map((msg) => {
             if (msg.role === "ai") {
