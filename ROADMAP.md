@@ -432,6 +432,24 @@ The map itself should feel like a journey. Sketch:
 
 Style: closer to Duolingo's playful illustration than to a serious sim. Charming, not corporate.
 
+### Audio / suspense build
+
+The atmosphere is what makes this funny instead of stressful. Layer ambient music that responds to the encounter's tension state:
+
+- **Default state (calm conversation flowing well)**: warm, mild, almost-not-noticed background. Maybe a subtle Spanish-flavoured guitar / cafe ambience appropriate to the location (park birdsong for the abuelo level, market chatter for the mercado, etc.).
+- **First mistakes (user stumbles)**: the music starts adding string-tension elements — the kind of sustained-violin rauschen / drone that horror or thriller scores use to signal "something is wrong". Quiet at first.
+- **Continuing mistakes / NPC frustration building**: tension layer gets louder, more dissonant. Maybe sparse high-string stabs. The NPC's portrait subtly shifts — eye narrowed, brow furrowed, slight delay before responding.
+- **Critical state (one or two more wrong moves and it's over)**: full suspense. The strings are now prominent, dissonant, building. The NPC is *visibly* about to switch — a long pause before their next line, a worried/disappointed look on the portrait. The user *feels* the imminent doom.
+- **Death sentence trigger**: BAM. Music spikes, portrait goes red-monstrous, "why don't we switch to English?" delivered with horror-comedy weight. Brief silence after. Then a fail-screen with the option to retry.
+- **On recovery (user pulls it back from the brink)**: the tension layer subsides over a few turns. Earned-back-trust feeling. NPC visibly relaxes. Catharsis.
+
+Implementation thoughts:
+- Few looping ambient tracks per location-mood (calm, tense, critical) crossfaded based on a tension counter the game state tracks. Tension counter = function of (recent mistakes, conversation duration without progress, native-language fallbacks per turn). Doesn't need to be smart — a simple weighted score works.
+- Tracks could be sourced from royalty-free libraries, or for character: a small commissioned music budget gives the app real personality. Big differentiator vs. Duolingo etc.
+- Audio is one of the cheapest UX wins for atmospheric games. A 5-minute composition pack covering calm/tense/critical/fail across 3-4 location moods is a few hundred dollars one-time and elevates the whole product.
+
+Mute toggle in settings is mandatory — many learners study in shared spaces or want their own music. But default-on is fine because it's so much of the atmospheric draw.
+
 ### Progression and reward economy
 
 XP system:
