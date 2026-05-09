@@ -196,6 +196,16 @@ Sometimes the bare translation isn't enough. The user wants to dig deeper withou
 
 ---
 
+## Bigger ideas captured elsewhere
+
+Some ideas grew big enough to deserve their own dedicated section in `ROADMAP.md` rather than living here as a sketch:
+
+- **Exploration Map / gamified language journey** — see ROADMAP §4. A new map-based mode where the user plays through NPC conversations across the target country, with anti-memorisation skill rubrics, side bosses, badges/coins/XP, and major checkpoints.
+
+When an idea here gets fleshed out enough to need a real build plan, it moves to ROADMAP and gets a one-line cross-reference here.
+
+---
+
 ## How these ideas relate
 
 Some of these are independent (1, 5). Others are more cohesive — (2) and (5) both extend the explanation depth in different parts of the UI; (3) and (4) both add live tutor-like layers; (1) and the existing vocab pipeline are tightly coupled. If we end up building several together, an obvious bundle:

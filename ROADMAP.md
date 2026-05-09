@@ -360,6 +360,119 @@ Implementation note: this either opens the topic grid as an overlay, or just spi
 
 ---
 
+## 4. Exploration Map — gamified language journey
+
+A major new mode (peer to "Conversation practice" and "Vocabulary repetition" on the dashboard, see §1). The user navigates a visual map of the target country — Spain for Castellano, optionally extending into Latin America for other variants. Each location on the map is an NPC encounter the user can play through. Defeating an NPC means completing a conversation cleanly, without misunderstandings derailing it and — crucially — without triggering the **death sentence**: the NPC switching to English ("why don't we switch to English?"). On fail, the NPCs visually go red, become monstrous, scream the death sentence; on win, the level checkmarks, rewards drop, and the user moves to the next location.
+
+The whole point is: *make progress feel like progress*, *make conversations feel like quests*, and *prevent rote memorisation* so the user actually has to learn the language to advance.
+
+### Core loop
+
+For each NPC encounter:
+1. **Setup** — a short scene framing why this person is talking to you and what's at stake (e.g. "she has to run and asks you to hold her baby for a moment"). LLM-generated at session start, varied each play.
+2. **Conversation gameplay** — voice-based back-and-forth, same correction pipeline as today (interpret → localize → segment → explain). The NPC's voice is TTS, the user records replies.
+3. **Success criteria** — implicit. The NPC does NOT switch to English. Misunderstandings either get resolved (good) or compound (bad). When the conversation reaches its natural end with the situation OK, level passed.
+4. **Fail criteria** — explicit. NPC says "why don't we switch to English?" → instant level fail. Or: the situation goes wrong (e.g. mother returns and the baby is upset because she got nothing right) → level fail.
+5. **Reward / consequence** — XP, coins, badges, map progress on success; a fail screen with the option to retry.
+
+### Concrete level examples (sketches, all variation-friendly)
+
+**Beginner — *El bebé en el parque*.** A Spanish woman approaches you in a park, clearly stressed, hands you her baby and asks if you can watch her for two minutes — she has to grab something urgent (the LLM picks a plausible reason — wallet at the bench, kid's lost shoe, etc.). The baby starts pointing at things in the park and asks "¿qué es eso?" — *what is that?* You name them. Each correct word is fine; each wrong word is silently noted. When the mother returns, she asks the baby what they learned — the baby parrots back what you said. If most are right, mother smiles, thanks you, level passed. If most are wrong, mother looks worried, takes the baby quickly, level failed (with a soft fail — no red-monster scream, just disappointment).
+
+Vocabulary tested: ~10-15 absolute beginner concrete nouns. Variation: the LLM picks from a pool of ~50 park-visible objects per playthrough; user can't memorise a fixed list.
+
+**Beginner — *El abuelo del banco*.** An old man in the park starts telling you about his life — slow speech, common words, no flowery language. He pauses, looks at you expectantly. You can ask follow-up questions ("¿y luego?", "¿cuántos años tenía?", etc.) to keep the conversation going. He occasionally tests you ("¿entiendes?"). Pass = engage well enough that the conversation winds down naturally with a "fue un gusto hablar contigo, joven". Fail = silence too long, or wrong response to "entiendes?" → he switches to English to help, level failed.
+
+**Intermediate — *La Sagrada Família*.** Cultural location: Barcelona. A tour guide near the basilica asks if you'd like a quick mini-tour. She talks about Gaudí, the construction history, the symbolism. You ask questions, react. Level passes if you stay engaged; fails if you can't follow and she switches.
+
+**Intermediate — *El partido en el Bernabéu*.** A Madrid football fan in a bar wants to discuss the last Real game. Heavy register, fast speech, lots of casual idioms. Level passes if you can hold a 5-minute conversation about the game.
+
+(Many more — markets, train stations, family dinners, regional festivals.)
+
+### Anti-memorisation as a core design principle
+
+This is non-negotiable. A user who knows zero Spanish must NOT be able to pass all levels in a day by memorising sequences. If they can, the gamification is hollow.
+
+**Mechanism**: every level is generated per-session by an LLM, given a **skill rubric** that fixes the difficulty target without fixing the content. The rubric specifies things like:
+- Vocabulary tier (~A1, ~A2, ~B1...)
+- Required grammatical structures (present tense only / + preterite / + subjunctive...)
+- Conversation length target (3 turns / 6 turns / 10+ turns)
+- "Failure modes to test" (e.g. "user must distinguish ser vs estar", "user must form a polite request")
+
+The LLM uses the rubric to construct a fresh scene and dialogue path each time. Same skill assessment, different surface. A user who passes "El bebé en el parque" once and tries again gets a different baby with different objects pointed at; the difficulty is identical, the script is not.
+
+**LLM is well-suited for this** — it can reliably generate level-equivalent content from a structured rubric. Risk: rubric drift (the LLM picks easier content than intended). Mitigation: a separate validator LLM call that checks "does this generated level meet the rubric's difficulty target?" before showing it.
+
+### Side bosses — optional encounters with weird mechanics
+
+Off the main path. Not required to progress. Reward: cosmetic (badges visible in profile), XP, coins (currency for some yet-to-design economy), titles. The mechanic is what makes them fun:
+
+- **El espíritu del bosque** — a forest spirit who will only listen to you if your replies are exactly 7 words AND grammatically perfect. Wrong word count → it gets bored and disappears. Grammar error → it gets scared and disappears.
+- **El poeta del río** — every reply must rhyme with the last word of his previous turn. The last words are LLM-generated each session, so no memorising the rhymes — you have to actually navigate Spanish phonology on the fly.
+- **La pitonisa** — luck-based. She rolls metaphorical dice; you get a difficulty class assigned for the encounter. Fair only on average.
+- **El pelele** — extreme difficulty. Conversation runs at 1.5× speed, no pauses, native register. You either keep up or you don't.
+
+Side bosses give the map texture beyond linear progression. Players who hit a tough main level can try a side boss instead, often coming back stronger.
+
+### Major checkpoints / aspirational characters
+
+The map shouldn't feel like a flat sequence. Specific destinations the user *wants* to reach:
+
+- **The cool guy in the bar in Madrid** who only talks to people who can hold their own. He's locked behind 7 levels of progression. Once you get to him, he opens up new map regions, gives you a unique badge, etc. Players grind toward him.
+- **The grandmother who tells you the family secret** — only opens up after you complete a "trust" sub-arc. A multi-session story payoff.
+- **The cathedral / monument moments** — visiting major cultural sites with rich content tied to them.
+
+### Atmospheric / visual design
+
+The map itself should feel like a journey. Sketch:
+- A stylised illustrated map of Spain (and later Latin America regions). Locations as pins.
+- NPCs visible at their locations as small character portraits.
+- On level-fail (NPC switches to English): the portrait turns red, animates monster-like, screams the death sentence. Brief horror-comedy effect — communicates "you really don't want this to happen" without being punishing.
+- On success: subtle celebration — a small animation, the next location pin unlocks, reward pop-up.
+
+Style: closer to Duolingo's playful illustration than to a serious sim. Charming, not corporate.
+
+### Progression and reward economy
+
+XP system:
+- Per level: XP scaled by difficulty
+- Per side boss: bonus XP
+- Per perfect playthrough (no errors): bonus
+- XP unlocks new map regions
+
+Currency (coins):
+- Drops from levels and side bosses
+- Spendable on... cosmetics? Hint tokens? Re-tries on a failed level without losing progress? TBD.
+
+Badges:
+- Visible in profile
+- Awarded for side bosses, special accomplishments ("first level passed without a single mistake", "rhymed with el poeta 5 times", "spoke for 10+ turns without a single English fallback")
+- Optional sharing if a social layer exists
+
+### Open design questions
+
+- **Engine / rendering**: 2D illustrated map in browser → straightforward (SVG / canvas). Native mobile would be cooler but a much bigger build. Web-first.
+- **Voice quality**: TTS for NPC voices needs to feel like *characters*, not narrator. May need different voices per NPC (the old man sounds old, the baby sounds high-pitched). gpt-4o-mini-tts has voice-styling via the `instructions` parameter; could parameterise per character. Or use multiple voice IDs.
+- **Story persistence**: once a level is passed, is the next playthrough a new variant of the same level (re-grindable) or locked-as-passed? Probably: passable once, replayable for XP at reduced rate.
+- **Progress save**: per-user "map state" (which locations passed, current XP, badges, etc.). New table `user_map_progress`.
+- **Cost per level**: each NPC encounter is a multi-turn LLM-generated conversation. Per turn: same as the current chat (correction + reply pipeline). Per level: maybe 5-10 turns × current per-turn cost (~$0.007) = $0.04-0.07 per level played. That's the dominant cost — would need to think about caps for free-tier users if there ever is one.
+- **Anti-memorisation validator**: a second LLM call per level-generation step to verify rubric adherence. Probably necessary; not free.
+- **Failure UX**: how harsh is the fail screen? Souls-like ("you died") or gentle ("the conversation didn't go well — try again")? Different audiences want different things.
+- **Content moderation**: the NPC scenes are LLM-generated. Edge cases where the LLM produces weird / inappropriate content for a learning context — guard prompt + content checks.
+
+### Build phasing
+
+If we ever do this, an order:
+1. **Single-level prototype** — one location, one NPC, no map. Just `/explore/level1` that runs the gamified conversation flow. Validates the core loop is fun before any map infrastructure.
+2. **Map shell** — 5-10 locations, hardcoded levels, basic XP / progress save.
+3. **Anti-memo skill rubric** — LLM-generated levels from rubric.
+4. **Side bosses + reward economy**.
+5. **Aspirational characters / story arcs**.
+
+Each phase is a substantial build (multi-week). This is months-of-work territory, not days. Worth it only when the conversation mode + vocab mode are stable and proven.
+
+---
+
 ## Implementation notes
 
 - Dashboard is a thin shell over existing routes — minimal new infra.
