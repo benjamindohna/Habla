@@ -54,6 +54,7 @@ export default function CorrectTestPage() {
         style: me.correctionStyle,
         localizeMini: localizeTier === "mini",
         segmentMini: segmentTier === "mini",
+        improvedSegmentPrompt: true,
       }),
     });
     if (!res.ok) {
@@ -157,6 +158,10 @@ export default function CorrectTestPage() {
             New corrections use the current toggles. Existing bubbles keep their original output;
             only the explain calls (segment-tap) re-fetch with the current explain toggle, but
             previously-cached explanations remain.
+          </p>
+          <p className="text-[11px] text-amber-700">
+            ⚡ This page also forces the V2 segment prompt + V2 explain prompt (dynamic length).
+            Production chat keeps V1.
           </p>
         </div>
 
@@ -274,6 +279,7 @@ function BubbleSlot({
       onDone={() => {}}
       onReCorrect={onReCorrect}
       explainMini={explainMini}
+      improvedExplainPrompt
     />
   );
 }

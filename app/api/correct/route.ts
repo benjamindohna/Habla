@@ -30,6 +30,10 @@ export async function POST(req: NextRequest) {
      *  override. Default false → production (chat_precise / gpt-4o). */
     localizeMini?: boolean;
     segmentMini?: boolean;
+    /** Test-only flag: use the consolidated V2 segment prompt
+     *  (coverage-invariants first, more diverse worked examples).
+     *  Default false → V1 (production-stable). */
+    improvedSegmentPrompt?: boolean;
   };
 
   const transcript = body.transcript?.trim();
@@ -60,6 +64,7 @@ export async function POST(req: NextRequest) {
       localVersionEs: local_version_es,
       nativeLanguage,
       task: segmentTask,
+      improvedPrompt: body.improvedSegmentPrompt === true,
     });
 
     const result: CorrectionResult = {

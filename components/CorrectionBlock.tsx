@@ -8,12 +8,16 @@ interface CorrectionBlockProps {
   nativeLanguage: string;
   /** Test-only: force /api/explain to use chat_light. Default false. */
   explainMini?: boolean;
+  /** Test-only: use the V2 explain prompt (dynamic-length, worked
+   *  example). Default false → production V1. */
+  improvedExplainPrompt?: boolean;
 }
 
 export default function CorrectionBlock({
   result,
   nativeLanguage,
   explainMini = false,
+  improvedExplainPrompt = false,
 }: CorrectionBlockProps) {
   const [selectedPair, setSelectedPair] = useState<Pair | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -95,6 +99,7 @@ export default function CorrectionBlock({
           userSegment: pair.user_segment,
           nativeLanguage,
           explainMini,
+          improvedExplainPrompt,
         }),
       });
       const data = await res.json();

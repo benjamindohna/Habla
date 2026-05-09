@@ -129,6 +129,127 @@ export async function localize(args: {
 
 // ── segment ──────────────────────────────────────────────────────────────
 
+/**
+ * V2 prompt — used only on /playground/correct-test for now. Same task
+ * as V1 but reorganised: coverage-invariants moved to the top (most
+ * critical), 21 rules consolidated to ~10, six worked examples covering
+ * compound-tense match / dropped clause / extra content / pure-target
+ * grammar error / full native fallback / mixed-language. Compound
+ * tenses are explicitly listed in the "must stay unified" rule.
+ */
+function segmentPromptV2(
+  nativeLanguage: string,
+  localVersionEs: string,
+  transcript: string,
+): string {
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+  const targetName = DEFAULT_TARGET.language;
+  return `You are a sentence-alignment engine for language learning.
+
+Your job: compare two sentences and produce ordered segment pairs showing the learner exactly which parts they got right and which differ.
+
+The learner's native language: ${nativeLanguage}
+The target language: ${target}
+
+LOCAL:   "${localVersionEs}"      (the perfect ${target} sentence)
+LEARNER: "${transcript}"          (what the learner actually said — may mix ${targetName} and ${nativeLanguage}, may have grammar errors, may be entirely in ${nativeLanguage})
+
+═════ COVERAGE INVARIANTS (absolute, trump everything else) ═════
+
+A. Concatenating all local_segment fields in order, joined with single spaces, MUST reconstruct LOCAL exactly (modulo whitespace and the punctuation rules below).
+B. Same rule for user_segment vs LEARNER.
+C. Every word from LOCAL appears in EXACTLY ONE local_segment — no drops, no duplicates.
+D. Every word from LEARNER appears in EXACTLY ONE user_segment — same rule.
+E. If you cannot satisfy A-D with a multi-pair alignment, return ONE pair containing all of LOCAL and all of LEARNER as a mismatch. This safe fallback is always better than dropping or duplicating words.
+
+═════ HOW TO ALIGN ═════
+
+1. Find pairs that are EXACT MATCHES — same word(s) in both versions, same meaning, same position. Mark with is_match: true.
+   - Don't match a word just because the same letters appear elsewhere — semantic position matters.
+   - Ignore trailing punctuation when deciding is_match (a comma-only difference is not a real difference).
+
+2. Keep these UNIFIED — never split them across pairs:
+   - article + noun ("el libro", "la casa")
+   - compound tenses: haber + past participle (he visto, había dicho, haya impresionado), estar + gerund (está hablando), ir a + infinitive (voy a hacer), modal periphrases (tener que ir, hay que hacerlo)
+   - clitic pronouns + their verb ("te haya impresionado", "se va", "me lo dijo")
+   - fixed expressions / idioms ("por ejemplo", "tener ganas", "darse cuenta", "echar de menos", "sin embargo")
+   - multi-word named entities ("Estados Unidos", "Real Madrid", "Gran Vía")
+
+3. For non-matching parts:
+   - Output LOCAL's content as local_segment, LEARNER's as user_segment, is_match: false.
+   - If the learner DROPPED something, user_segment is "" (empty string). Do NOT merge into the next pair.
+   - If the learner ADDED something the LOCAL didn't have, output a dedicated pair with local_segment "". Do NOT merge.
+
+4. Output order = order of LOCAL (left to right).
+
+═════ FORMATTING ═════
+
+- Each segment field must NOT begin or end with whitespace.
+- Standalone punctuation (",", ";", ":") is NEVER its own segment — attach to the preceding segment.
+- The final segment ends with the sentence's closing punctuation.
+- Numbers as words, never digits.
+- No markdown, no commentary outside the JSON.
+
+═════ WORKED EXAMPLES (target Spanish, learner native German) ═════
+
+EXAMPLE 1 — mixed native fallback in user input:
+LOCAL:   "Voy a un campo de fútbol con mis amigos."
+LEARNER: "voy in un Fußballfeld con mi Freunde."
+pairs:
+  { "local_segment": "Voy a", "user_segment": "voy", "is_match": false }
+  { "local_segment": "un", "user_segment": "in un", "is_match": false }
+  { "local_segment": "campo de fútbol", "user_segment": "Fußballfeld", "is_match": false }
+  { "local_segment": "con", "user_segment": "con", "is_match": true }
+  { "local_segment": "mis amigos.", "user_segment": "mi Freunde.", "is_match": false }
+
+EXAMPLE 2 — pure target, wrong verb conjugation:
+LOCAL:   "Yo voy a la playa."
+LEARNER: "Yo va a la playa."
+pairs:
+  { "local_segment": "Yo", "user_segment": "Yo", "is_match": true }
+  { "local_segment": "voy", "user_segment": "va", "is_match": false }
+  { "local_segment": "a la playa.", "user_segment": "a la playa.", "is_match": true }
+
+EXAMPLE 3 — compound tense matched as ONE pair:
+LOCAL:   "Ya he visto la película."
+LEARNER: "Ya he visto la película."
+pairs:
+  { "local_segment": "Ya", "user_segment": "Ya", "is_match": true }
+  { "local_segment": "he visto", "user_segment": "he visto", "is_match": true }
+  { "local_segment": "la película.", "user_segment": "la película.", "is_match": true }
+
+EXAMPLE 4 — learner dropped a whole clause:
+LOCAL:   "Quiero ir al cine, pero estoy cansado."
+LEARNER: "Quiero ir al cine."
+pairs:
+  { "local_segment": "Quiero", "user_segment": "Quiero", "is_match": true }
+  { "local_segment": "ir al cine", "user_segment": "ir al cine.", "is_match": true }
+  { "local_segment": ", pero estoy cansado.", "user_segment": "", "is_match": false }
+
+EXAMPLE 5 — learner added something extra:
+LOCAL:   "Me gusta el café."
+LEARNER: "Me gusta mucho el café."
+pairs:
+  { "local_segment": "Me gusta", "user_segment": "Me gusta", "is_match": true }
+  { "local_segment": "", "user_segment": "mucho", "is_match": false }
+  { "local_segment": "el café.", "user_segment": "el café.", "is_match": true }
+
+EXAMPLE 6 — learner spoke entirely in native language:
+LOCAL:   "Me llamo Carlos y soy de Madrid."
+LEARNER: "Ich heiße Carlos und komme aus Madrid."
+pairs:
+  { "local_segment": "Me llamo Carlos y soy de Madrid.", "user_segment": "Ich heiße Carlos und komme aus Madrid.", "is_match": false }
+
+═════ OUTPUT ═════
+
+Return ONLY valid JSON:
+{
+  "pairs": [
+    { "local_segment": "string", "user_segment": "string", "is_match": true }
+  ]
+}`;
+}
+
 function segmentPrompt(nativeLanguage: string, localVersionEs: string, transcript: string): string {
   const target = describeTargetLanguage(DEFAULT_TARGET);
   const targetName = DEFAULT_TARGET.language;
@@ -285,12 +406,18 @@ export async function segment(args: {
   nativeLanguage: string;
   /** Override the model tier (see localize). */
   task?: ChatTask;
+  /** When true, use the consolidated V2 prompt (coverage-invariants
+   *  to top, six diverse worked examples, compound-tense rule). Used
+   *  by /playground/correct-test to A/B-compare prompt versions before
+   *  promoting to production. Default false → existing V1 prompt. */
+  improvedPrompt?: boolean;
 }): Promise<Pair[]> {
   const task = args.task ?? "chat_precise";
+  const buildPrompt = args.improvedPrompt ? segmentPromptV2 : segmentPrompt;
   const { pairs } = await chatJSON<{ pairs: Pair[] }>({
     task,
-    label: `segment/${task}`,
-    userPrompt: segmentPrompt(args.nativeLanguage, args.localVersionEs, args.transcript),
+    label: `segment/${task}${args.improvedPrompt ? "/v2" : ""}`,
+    userPrompt: buildPrompt(args.nativeLanguage, args.localVersionEs, args.transcript),
   });
   const normalized = normalizePairs(pairs);
   warnIfCoverageBroken(normalized, args.transcript, args.localVersionEs);

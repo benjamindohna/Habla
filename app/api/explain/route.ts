@@ -2,11 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { chatText } from "@/lib/llm";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
 
-function buildPrompt(
+/**
+ * Compute (min, max) sentence length range based on the local segment's
+ * word count. Short segments deserve quick explanations; longer ones
+ * need more room. Pure deterministic, no LLM call.
+ */
+function sentenceLimits(localSegment: string): { min: number; max: number } {
+  const words = localSegment.trim().split(/\s+/).filter(Boolean).length;
+  if (words <= 3) return { min: 1, max: 6 };
+  if (words <= 6) return { min: 1, max: 8 };
+  return { min: 4, max: 12 };
+}
+
+function buildPromptV1(
   localVersionEs: string,
   localSegment: string,
   userSegment: string,
-  nativeLanguage: string
+  nativeLanguage: string,
 ): string {
   const target = describeTargetLanguage(DEFAULT_TARGET);
   const targetName = DEFAULT_TARGET.language;
@@ -28,6 +40,42 @@ Rules for your response:
 - Every sentence should add something concrete. Cut anything vague or filler.`;
 }
 
+function buildPromptV2(
+  localVersionEs: string,
+  localSegment: string,
+  userSegment: string,
+  nativeLanguage: string,
+): string {
+  const target = describeTargetLanguage(DEFAULT_TARGET);
+  const targetName = DEFAULT_TARGET.language;
+  const { min, max } = sentenceLimits(localSegment);
+  const wordCount = localSegment.trim().split(/\s+/).filter(Boolean).length;
+  return `You are a helpful ${target} tutor. A learner is studying ${targetName} and wants feedback on a specific part of a sentence.
+
+Full sentence (perfect ${target}): "${localVersionEs}"
+Correct version of this segment: "${localSegment}" (${wordCount} word${wordCount === 1 ? "" : "s"})
+What the learner said: "${userSegment || "(nothing — this part was left out)"}"
+
+Important context about how this learner speaks:
+- The learner intentionally falls back to ${nativeLanguage} for words or phrases they don't yet know in ${targetName}. When the learner used a ${nativeLanguage} word, treat it as a request to learn the ${targetName} equivalent — just teach them the ${targetName}.
+- NEVER point out that the word is ${nativeLanguage}. The learner already knows that. Do NOT write phrases like "X is ${nativeLanguage}", "in your language you said X", "you used the ${nativeLanguage} word", or anything similar. Skip the meta-commentary entirely and go straight to the ${targetName} explanation.
+
+Provide feedback in ${nativeLanguage} to help the learner understand and improve. Cover whatever is most useful — vocabulary, grammar, usage, word forms, or anything else relevant. Use **bold** for ${targetName} words, key terms, and important concepts. Use line breaks between distinct points. Examples and corrections must use ${target} (the variety the learner is studying).
+
+LENGTH: ${min} to ${max} sentences. The segment is ${wordCount} word${wordCount === 1 ? "" : "s"} long — calibrate accordingly. Single-word fixes need 1-2 sentences; longer multi-word constructions may need more so you can cover both vocabulary and grammar. Never exceed ${max} sentences.
+
+Rules:
+- Start directly with the feedback. No preamble, no "of course", no "great question", no meta-comments.
+- Every sentence should add something concrete. Cut anything vague or filler.
+
+Worked example (target Spanish, native German):
+  Segment: "campo de fútbol"
+  Learner said: "Fußballfeld"
+  Feedback:
+    Auf Spanisch sagt man **"campo de fútbol"** — wörtlich „Feld des Fußballs".
+    Die Konstruktion **Substantiv + de + Substantiv** ist im Spanischen sehr häufig (z.B. **"pelota de tenis"**, **"libro de historia"**).`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const {
@@ -36,13 +84,17 @@ export async function POST(req: NextRequest) {
       userSegment,
       nativeLanguage = "German",
       explainMini = false,
+      improvedExplainPrompt = false,
     } = (await req.json()) as {
       localVersionEs: string;
       localSegment: string;
       userSegment: string;
       nativeLanguage?: string;
-      /** Test-only flag from /playground/correct-test: forces chat_light. */
+      /** Test-only: forces chat_light. */
       explainMini?: boolean;
+      /** Test-only: uses V2 prompt with dynamic-length sentence limit
+       *  and worked example. Default false → V1 (production-stable). */
+      improvedExplainPrompt?: boolean;
     };
 
     if (!localVersionEs || !localSegment) {
@@ -50,12 +102,17 @@ export async function POST(req: NextRequest) {
     }
 
     const task = explainMini === true ? "chat_light" : "chat_precise";
+    const buildPrompt = improvedExplainPrompt ? buildPromptV2 : buildPromptV1;
+    // Token cap scales with the prompt's sentence range so longer
+    // explanations don't get truncated mid-sentence.
+    const { max } = sentenceLimits(localSegment);
+    const maxTokens = improvedExplainPrompt ? Math.max(250, max * 50) : 250;
     const explanation = await chatText({
       task,
-      label: `explain/${task}`,
+      label: `explain/${task}${improvedExplainPrompt ? "/v2" : ""}`,
       userPrompt: buildPrompt(localVersionEs, localSegment, userSegment, nativeLanguage),
       temperature: 0.4,
-      maxTokens: 250,
+      maxTokens,
     });
     return NextResponse.json({ explanation });
   } catch (err) {
