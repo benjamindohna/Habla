@@ -7,13 +7,13 @@ interface CorrectionBlockProps {
   result: CorrectionResult;
   nativeLanguage: string;
   /** Test-only: force /api/explain to use chat_light. Default false. */
-  useMini?: boolean;
+  explainMini?: boolean;
 }
 
 export default function CorrectionBlock({
   result,
   nativeLanguage,
-  useMini = false,
+  explainMini = false,
 }: CorrectionBlockProps) {
   const [selectedPair, setSelectedPair] = useState<Pair | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -94,7 +94,7 @@ export default function CorrectionBlock({
           localSegment: pair.local_segment,
           userSegment: pair.user_segment,
           nativeLanguage,
-          useMini,
+          explainMini,
         }),
       });
       const data = await res.json();

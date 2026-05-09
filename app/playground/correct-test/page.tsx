@@ -5,6 +5,7 @@ import UserBubble from "@/components/UserBubble";
 import type { CorrectionResult } from "@/types/correction";
 
 type CorrectionStyle = "natural" | "transcript_aware";
+type Tier = "mini" | "4o";
 
 interface Me {
   nativeLanguage: string;
@@ -24,6 +25,12 @@ export default function CorrectTestPage() {
   const [input, setInput] = useState("");
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [meError, setMeError] = useState<string | null>(null);
+
+  // Per-step model toggles. Default mini for all so testing the cheaper
+  // tier is the starting state; flip to 4o per step to A/B-compare.
+  const [localizeTier, setLocalizeTier] = useState<Tier>("mini");
+  const [segmentTier, setSegmentTier] = useState<Tier>("mini");
+  const [explainTier, setExplainTier] = useState<Tier>("mini");
 
   useEffect(() => {
     fetch("/api/me")
@@ -45,7 +52,8 @@ export default function CorrectTestPage() {
         overrideIntendedMeaning: args.overrideIntendedMeaning,
         nativeLanguage: me.nativeLanguage,
         style: me.correctionStyle,
-        useMini: true,
+        localizeMini: localizeTier === "mini",
+        segmentMini: segmentTier === "mini",
       }),
     });
     if (!res.ok) {
@@ -130,9 +138,6 @@ export default function CorrectTestPage() {
             (interpret → localize → segment) and render a user-bubble like the chat would. Per-segment
             explanations on click. No Done button — this is read-only for inspection.
           </p>
-          <p className="text-xs text-amber-600">
-            ⚡ Forced to gpt-4o-mini for localize / segment / explain. Production chat keeps gpt-4o.
-          </p>
           {me && (
             <p className="text-xs text-neutral-400">
               Using your profile: native={me.nativeLanguage} · style={me.correctionStyle}
@@ -140,6 +145,20 @@ export default function CorrectTestPage() {
           )}
           {meError && <p className="text-xs text-red-500">profile load failed: {meError}</p>}
         </header>
+
+        <div className="border border-neutral-200 rounded-lg p-3 bg-white space-y-2">
+          <p className="text-xs uppercase tracking-wide text-neutral-400">Model per step</p>
+          <div className="flex flex-wrap gap-4">
+            <TierToggle label="Localize" value={localizeTier} onChange={setLocalizeTier} />
+            <TierToggle label="Segment" value={segmentTier} onChange={setSegmentTier} />
+            <TierToggle label="Explain" value={explainTier} onChange={setExplainTier} />
+          </div>
+          <p className="text-[11px] text-neutral-400">
+            New corrections use the current toggles. Existing bubbles keep their original output;
+            only the explain calls (segment-tap) re-fetch with the current explain toggle, but
+            previously-cached explanations remain.
+          </p>
+        </div>
 
         <div className="space-y-2">
           <input
@@ -163,6 +182,7 @@ export default function CorrectTestPage() {
                 key={b.id}
                 bubble={b}
                 nativeLanguage={me?.nativeLanguage ?? "German"}
+                explainMini={explainTier === "mini"}
                 onReCorrect={(override) => handleReCorrect(b.id, override)}
               />
             ))}
@@ -173,13 +193,55 @@ export default function CorrectTestPage() {
   );
 }
 
+function TierToggle({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: Tier;
+  onChange: (t: Tier) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="text-neutral-600 font-medium">{label}</span>
+      <div className="inline-flex rounded border border-neutral-300 overflow-hidden">
+        <button
+          onClick={() => onChange("4o")}
+          className={
+            "px-2 py-1 transition-colors " +
+            (value === "4o"
+              ? "bg-neutral-900 text-white"
+              : "bg-white text-neutral-600 hover:bg-neutral-100")
+          }
+        >
+          4o
+        </button>
+        <button
+          onClick={() => onChange("mini")}
+          className={
+            "px-2 py-1 transition-colors border-l border-neutral-300 " +
+            (value === "mini"
+              ? "bg-neutral-900 text-white"
+              : "bg-white text-neutral-600 hover:bg-neutral-100")
+          }
+        >
+          mini
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function BubbleSlot({
   bubble,
   nativeLanguage,
+  explainMini,
   onReCorrect,
 }: {
   bubble: Bubble;
   nativeLanguage: string;
+  explainMini: boolean;
   onReCorrect: (override: string) => void;
 }) {
   const status = bubble.status;
@@ -211,7 +273,7 @@ function BubbleSlot({
       showDone={false}
       onDone={() => {}}
       onReCorrect={onReCorrect}
-      useMini
+      explainMini={explainMini}
     />
   );
 }

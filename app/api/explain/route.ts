@@ -35,21 +35,21 @@ export async function POST(req: NextRequest) {
       localSegment,
       userSegment,
       nativeLanguage = "German",
-      useMini = false,
+      explainMini = false,
     } = (await req.json()) as {
       localVersionEs: string;
       localSegment: string;
       userSegment: string;
       nativeLanguage?: string;
       /** Test-only flag from /playground/correct-test: forces chat_light. */
-      useMini?: boolean;
+      explainMini?: boolean;
     };
 
     if (!localVersionEs || !localSegment) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const task = useMini === true ? "chat_light" : "chat_precise";
+    const task = explainMini === true ? "chat_light" : "chat_precise";
     const explanation = await chatText({
       task,
       label: `explain/${task}`,

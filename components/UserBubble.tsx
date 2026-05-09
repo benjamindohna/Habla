@@ -12,7 +12,7 @@ interface UserBubbleProps {
   onReCorrect: (override: string) => void;
   /** Test-only: forwarded to CorrectionBlock so /api/explain runs on
    *  chat_light. Used by /playground/correct-test. Default false. */
-  useMini?: boolean;
+  explainMini?: boolean;
 }
 
 // One user turn in the chat: the corrected interpretation, the segmented
@@ -25,7 +25,7 @@ export default function UserBubble({
   showDone,
   onDone,
   onReCorrect,
-  useMini = false,
+  explainMini = false,
 }: UserBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(result.intended_meaning_native);
@@ -78,7 +78,7 @@ export default function UserBubble({
         </div>
 
         {/* The correction itself */}
-        <CorrectionBlock result={result} nativeLanguage={nativeLanguage} useMini={useMini} />
+        <CorrectionBlock result={result} nativeLanguage={nativeLanguage} explainMini={explainMini} />
 
         {/* Done — only shown on the latest user bubble while AI hasn't replied */}
         {showDone && (
