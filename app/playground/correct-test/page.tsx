@@ -6,6 +6,7 @@ import type { CorrectionResult } from "@/types/correction";
 
 type CorrectionStyle = "natural" | "transcript_aware";
 type Tier = "mini" | "4o";
+type PromptVersion = "v1" | "v2";
 
 interface Me {
   nativeLanguage: string;
@@ -32,6 +33,12 @@ export default function CorrectTestPage() {
   const [segmentTier, setSegmentTier] = useState<Tier>("mini");
   const [explainTier, setExplainTier] = useState<Tier>("mini");
 
+  // Per-step prompt-version toggles. Localize has no V2, so no toggle
+  // for it. Default segment=v1 (matches current state, can flip to v2);
+  // default explain=v2 (the dynamic-length version we set up earlier).
+  const [segmentPrompt, setSegmentPrompt] = useState<PromptVersion>("v1");
+  const [explainPrompt, setExplainPrompt] = useState<PromptVersion>("v2");
+
   useEffect(() => {
     fetch("/api/me")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
@@ -54,7 +61,7 @@ export default function CorrectTestPage() {
         style: me.correctionStyle,
         localizeMini: localizeTier === "mini",
         segmentMini: segmentTier === "mini",
-        improvedSegmentPrompt: false,
+        improvedSegmentPrompt: segmentPrompt === "v2",
       }),
     });
     if (!res.ok) {
@@ -147,21 +154,27 @@ export default function CorrectTestPage() {
           {meError && <p className="text-xs text-red-500">profile load failed: {meError}</p>}
         </header>
 
-        <div className="border border-neutral-200 rounded-lg p-3 bg-white space-y-2">
-          <p className="text-xs uppercase tracking-wide text-neutral-400">Model per step</p>
-          <div className="flex flex-wrap gap-4">
-            <TierToggle label="Localize" value={localizeTier} onChange={setLocalizeTier} />
-            <TierToggle label="Segment" value={segmentTier} onChange={setSegmentTier} />
-            <TierToggle label="Explain" value={explainTier} onChange={setExplainTier} />
+        <div className="border border-neutral-200 rounded-lg p-3 bg-white space-y-3">
+          <div className="grid grid-cols-[auto_1fr_1fr] gap-x-6 gap-y-2 items-center text-xs">
+            <span className="col-start-2 uppercase tracking-wide text-neutral-400">Model</span>
+            <span className="uppercase tracking-wide text-neutral-400">Prompt</span>
+
+            <span className="text-neutral-700 font-medium">Localize</span>
+            <PillToggle value={localizeTier} options={["4o", "mini"]} onChange={setLocalizeTier} />
+            <span className="text-[11px] text-neutral-400 italic">no V2 yet</span>
+
+            <span className="text-neutral-700 font-medium">Segment</span>
+            <PillToggle value={segmentTier} options={["4o", "mini"]} onChange={setSegmentTier} />
+            <PillToggle value={segmentPrompt} options={["v1", "v2"]} onChange={setSegmentPrompt} />
+
+            <span className="text-neutral-700 font-medium">Explain</span>
+            <PillToggle value={explainTier} options={["4o", "mini"]} onChange={setExplainTier} />
+            <PillToggle value={explainPrompt} options={["v1", "v2"]} onChange={setExplainPrompt} />
           </div>
           <p className="text-[11px] text-neutral-400">
             New corrections use the current toggles. Existing bubbles keep their original output;
             only the explain calls (segment-tap) re-fetch with the current explain toggle, but
-            previously-cached explanations remain.
-          </p>
-          <p className="text-[11px] text-amber-700">
-            ⚡ This page forces the V2 explain prompt (dynamic length). Segment prompt is back on V1.
-            Production chat keeps V1 for both.
+            previously-cached explanations remain. Production chat is unaffected (always V1 + 4o).
           </p>
         </div>
 
@@ -188,6 +201,7 @@ export default function CorrectTestPage() {
                 bubble={b}
                 nativeLanguage={me?.nativeLanguage ?? "German"}
                 explainMini={explainTier === "mini"}
+                explainPromptV2={explainPrompt === "v2"}
                 onReCorrect={(override) => handleReCorrect(b.id, override)}
               />
             ))}
@@ -198,42 +212,40 @@ export default function CorrectTestPage() {
   );
 }
 
-function TierToggle({
-  label,
+function PillToggle<T extends string>({
   value,
+  options,
   onChange,
 }: {
-  label: string;
-  value: Tier;
-  onChange: (t: Tier) => void;
+  value: T;
+  options: [T, T];
+  onChange: (v: T) => void;
 }) {
+  const [a, b] = options;
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="text-neutral-600 font-medium">{label}</span>
-      <div className="inline-flex rounded border border-neutral-300 overflow-hidden">
-        <button
-          onClick={() => onChange("4o")}
-          className={
-            "px-2 py-1 transition-colors " +
-            (value === "4o"
-              ? "bg-neutral-900 text-white"
-              : "bg-white text-neutral-600 hover:bg-neutral-100")
-          }
-        >
-          4o
-        </button>
-        <button
-          onClick={() => onChange("mini")}
-          className={
-            "px-2 py-1 transition-colors border-l border-neutral-300 " +
-            (value === "mini"
-              ? "bg-neutral-900 text-white"
-              : "bg-white text-neutral-600 hover:bg-neutral-100")
-          }
-        >
-          mini
-        </button>
-      </div>
+    <div className="inline-flex rounded border border-neutral-300 overflow-hidden self-start text-xs">
+      <button
+        onClick={() => onChange(a)}
+        className={
+          "px-2 py-1 transition-colors " +
+          (value === a
+            ? "bg-neutral-900 text-white"
+            : "bg-white text-neutral-600 hover:bg-neutral-100")
+        }
+      >
+        {a}
+      </button>
+      <button
+        onClick={() => onChange(b)}
+        className={
+          "px-2 py-1 transition-colors border-l border-neutral-300 " +
+          (value === b
+            ? "bg-neutral-900 text-white"
+            : "bg-white text-neutral-600 hover:bg-neutral-100")
+        }
+      >
+        {b}
+      </button>
     </div>
   );
 }
@@ -242,11 +254,13 @@ function BubbleSlot({
   bubble,
   nativeLanguage,
   explainMini,
+  explainPromptV2,
   onReCorrect,
 }: {
   bubble: Bubble;
   nativeLanguage: string;
   explainMini: boolean;
+  explainPromptV2: boolean;
   onReCorrect: (override: string) => void;
 }) {
   const status = bubble.status;
@@ -279,7 +293,7 @@ function BubbleSlot({
       onDone={() => {}}
       onReCorrect={onReCorrect}
       explainMini={explainMini}
-      improvedExplainPrompt
+      improvedExplainPrompt={explainPromptV2}
     />
   );
 }
