@@ -6,18 +6,19 @@ import type { CorrectionResult, Pair } from "@/types/correction";
 interface CorrectionBlockProps {
   result: CorrectionResult;
   nativeLanguage: string;
-  /** Test-only: force /api/explain to use chat_light. Default false. */
+  /** Override the explain model. undefined → server default (chat_light).
+   *  Playground sets explicit boolean via the model toggle. */
   explainMini?: boolean;
-  /** Test-only: use the V2 explain prompt (dynamic-length, worked
-   *  example). Default false → production V1. */
+  /** Override the explain prompt version. undefined → server default (V2).
+   *  Playground sets explicit boolean via the prompt-version toggle. */
   improvedExplainPrompt?: boolean;
 }
 
 export default function CorrectionBlock({
   result,
   nativeLanguage,
-  explainMini = false,
-  improvedExplainPrompt = false,
+  explainMini,
+  improvedExplainPrompt,
 }: CorrectionBlockProps) {
   const [selectedPair, setSelectedPair] = useState<Pair | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);

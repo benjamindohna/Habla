@@ -10,10 +10,9 @@ interface UserBubbleProps {
   showDone: boolean;
   onDone: () => void;
   onReCorrect: (override: string) => void;
-  /** Test-only: forwarded to CorrectionBlock so /api/explain runs on
-   *  chat_light. Used by /playground/correct-test. Default false. */
+  /** Override forwarded to CorrectionBlock. undefined → server defaults. */
   explainMini?: boolean;
-  /** Test-only: forwarded to CorrectionBlock for V2 explain prompt. */
+  /** Override forwarded to CorrectionBlock. undefined → server defaults. */
   improvedExplainPrompt?: boolean;
 }
 
@@ -27,8 +26,8 @@ export default function UserBubble({
   showDone,
   onDone,
   onReCorrect,
-  explainMini = false,
-  improvedExplainPrompt = false,
+  explainMini,
+  improvedExplainPrompt,
 }: UserBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(result.intended_meaning_native);

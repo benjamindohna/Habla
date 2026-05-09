@@ -83,17 +83,18 @@ export async function POST(req: NextRequest) {
       localSegment,
       userSegment,
       nativeLanguage = "German",
-      explainMini = false,
-      improvedExplainPrompt = false,
+      explainMini,
+      improvedExplainPrompt,
     } = (await req.json()) as {
       localVersionEs: string;
       localSegment: string;
       userSegment: string;
       nativeLanguage?: string;
-      /** Test-only: forces chat_light. */
+      /** undefined = use server default (chat_light). Playground sends
+       *  explicit boolean via the model toggle. */
       explainMini?: boolean;
-      /** Test-only: uses V2 prompt with dynamic-length sentence limit
-       *  and worked example. Default false → V1 (production-stable). */
+      /** undefined = use server default (V2). Playground sends explicit
+       *  boolean via the prompt-version toggle. */
       improvedExplainPrompt?: boolean;
     };
 
@@ -101,15 +102,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const task = explainMini === true ? "chat_light" : "chat_precise";
-    const buildPrompt = improvedExplainPrompt ? buildPromptV2 : buildPromptV1;
-    // Token cap scales with the prompt's sentence range so longer
+    // Production defaults: chat_light (mini) + V2 prompt. Playground
+    // overrides via explicit booleans through the prop chain.
+    const task = explainMini === false ? "chat_precise" : "chat_light";
+    const useV2 = improvedExplainPrompt !== false;
+    const buildPrompt = useV2 ? buildPromptV2 : buildPromptV1;
+    // V2 maxTokens scales with the prompt's sentence range so longer
     // explanations don't get truncated mid-sentence.
     const { max } = sentenceLimits(localSegment);
-    const maxTokens = improvedExplainPrompt ? Math.max(250, max * 50) : 250;
+    const maxTokens = useV2 ? Math.max(250, max * 50) : 250;
     const explanation = await chatText({
       task,
-      label: `explain/${task}${improvedExplainPrompt ? "/v2" : ""}`,
+      label: `explain/${task}${useV2 ? "/v2" : ""}`,
       userPrompt: buildPrompt(localVersionEs, localSegment, userSegment, nativeLanguage),
       temperature: 0.4,
       maxTokens,

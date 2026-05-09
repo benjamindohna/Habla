@@ -43,8 +43,15 @@ export async function POST(req: NextRequest) {
   const nativeLanguage = body.nativeLanguage?.trim() || "German";
   const style: CorrectionStyle = body.style === "transcript_aware" ? "transcript_aware" : "natural";
   const override = body.overrideIntendedMeaning?.trim();
+
+  // Production defaults (when client doesn't send the flag):
+  //   localize → chat_precise (4o) — needed for accurate target-language output
+  //   segment  → chat_light (mini) — counter-intuitively better at clean alignment
+  // Playground sends explicit booleans via its toggles, those win.
   const localizeTask = body.localizeMini === true ? "chat_light" : "chat_precise";
-  const segmentTask = body.segmentMini === true ? "chat_light" : "chat_precise";
+  const segmentTask = body.segmentMini === false ? "chat_precise" : "chat_light";
+  // Default V2 segment prompt — V1 only when client explicitly opts out.
+  const useImprovedSegmentPrompt = body.improvedSegmentPrompt !== false;
 
   try {
     const interpretation = override
@@ -64,7 +71,7 @@ export async function POST(req: NextRequest) {
       localVersionEs: local_version_es,
       nativeLanguage,
       task: segmentTask,
-      improvedPrompt: body.improvedSegmentPrompt === true,
+      improvedPrompt: useImprovedSegmentPrompt,
     });
 
     const result: CorrectionResult = {

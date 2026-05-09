@@ -404,19 +404,23 @@ export async function segment(args: {
   transcript: string;
   localVersionEs: string;
   nativeLanguage: string;
-  /** Override the model tier (see localize). */
+  /** Override the model tier. Production default is chat_light
+   *  (gpt-4o-mini): empirically mini does BETTER segmentation than 4o
+   *  on this prompt — 4o tends to over-merge correct user parts into
+   *  mismatch segments. The /playground/correct-test page can flip
+   *  to chat_precise via the toggle. */
   task?: ChatTask;
-  /** When true, use the consolidated V2 prompt (coverage-invariants
-   *  to top, six diverse worked examples, compound-tense rule). Used
-   *  by /playground/correct-test to A/B-compare prompt versions before
-   *  promoting to production. Default false → existing V1 prompt. */
+  /** Production default is V2 (consolidated rules + 6 worked examples
+   *  + explicit compound-tense rule). V1 stays available via the
+   *  playground toggle for comparison. */
   improvedPrompt?: boolean;
 }): Promise<Pair[]> {
-  const task = args.task ?? "chat_precise";
-  const buildPrompt = args.improvedPrompt ? segmentPromptV2 : segmentPrompt;
+  const task = args.task ?? "chat_light";
+  const useV2 = args.improvedPrompt !== false; // default V2; only false explicitly disables
+  const buildPrompt = useV2 ? segmentPromptV2 : segmentPrompt;
   const { pairs } = await chatJSON<{ pairs: Pair[] }>({
     task,
-    label: `segment/${task}${args.improvedPrompt ? "/v2" : ""}`,
+    label: `segment/${task}${useV2 ? "/v2" : ""}`,
     userPrompt: buildPrompt(args.nativeLanguage, args.localVersionEs, args.transcript),
   });
   const normalized = normalizePairs(pairs);
