@@ -432,6 +432,26 @@ The map itself should feel like a journey. Sketch:
 
 Style: closer to Duolingo's playful illustration than to a serious sim. Charming, not corporate.
 
+### Character expression progression — emotional stakes
+
+The NPCs aren't quest-givers, they're *people the player should not want to disappoint*. Their portraits and micro-expressions evolve through the encounter based on the same tension counter that drives the audio:
+
+- **Default** — warm, open, pleased to be talking to the player. The abuelo del banco genuinely smiles; the woman with the baby is grateful; the tour guide is enthusiastic.
+- **First mistakes** — micro-expressions only. A brief suspicious glance with narrowed eyes — *„hm, was war das?"* — then back to normal. A raised brow. A slightly delayed reaction. Subtle enough that some players will only feel it subliminally; others will register the shift consciously and snap to attention.
+- **Continued mistakes** — the warmth visibly drains. The abuelo stops smiling. The mother holds her baby a little tighter. The tour guide's enthusiasm cools to politeness. The portrait shifts but isn't yet alarming.
+- **Critical state** — the character looks *let down*. Not angry yet — disappointed. The abuelo's brow furrows; he looks at you the way an old man looks at a kid who isn't paying attention. The mother starts looking around as if maybe she shouldn't have trusted you. The kind of "you're losing them" feeling that's far more motivating than any score bar.
+- **Death sentence** — the character is transformed. Per-personality:
+  - The abuelo goes cynical-resigned, says *„weißt du was, vielleicht ist es einfacher auf Englisch"* with a tired half-smile that contains all the disappointment in the world. No anger, just a quiet "I gave up on you".
+  - The mother gets sharply protective — sudden distrust, takes the baby back fast, *"sabes qué, mejor en inglés"* with edge.
+  - The football fan in the Madrid bar gets annoyed-bordering-on-angry — *"tío, vamos a inglés y ya está"*.
+  - Each character's failure mode reflects who they are. Same mechanic, different emotional flavour.
+
+The point isn't to make the player feel bad — the failure animation is still horror-comedy with the red-monster spike from the visual design. The point is the *journey to that point* should feel emotionally real. The micro-expressions in the warning phase are what make the player think *"shit, I don't want to disappoint this guy"* and decide to actually sit down and learn before retrying — not just hammer the level until they brute-force it.
+
+Implementation: per character, a small set of portrait states (5-7 expressions covering default → mild suspicion → cooling → disappointed → death-sentence-transformed). The tension counter selects the active state. Same engine as the audio crossfade. For LLM-driven NPC dialogue, the system prompt can also inject the current emotional state so the character's *spoken* lines match the *visual* state — getting curter, less generous, more terse as tension rises.
+
+This is the difference between a level the player tries again and again because they want to win, and a level the player goes away from and **studies for** because they don't want to disappoint a character they've come to respect. The latter is what actually makes the gamification align with learning instead of fighting it.
+
 ### Audio / suspense build
 
 The atmosphere is what makes this funny instead of stressful. Layer ambient music that responds to the encounter's tension state:
