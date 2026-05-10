@@ -73,9 +73,6 @@ export default function VocabCardStack({ cards, exitingId, frontOverlay }: Props
   const blobCacheRef = useRef<Map<number, Blob>>(new Map());
 
   const frontCardId = isExiting ? cards[1]?.id : cards[0]?.id;
-  const frontCardWord = isExiting
-    ? cards[1]?.target_word_original
-    : cards[0]?.target_word_original;
 
   // Stop any in-flight playback when the front card changes (after a
   // commit + exit, the next card slides in — we don't want the previous
@@ -99,7 +96,7 @@ export default function VocabCardStack({ cards, exitingId, frontOverlay }: Props
   }, []);
 
   async function handleSpeak() {
-    if (!frontCardId || !frontCardWord) return;
+    if (!frontCardId) return;
     if (ttsLoading) return;
 
     // Toggle off if currently playing.
@@ -114,10 +111,10 @@ export default function VocabCardStack({ cards, exitingId, frontOverlay }: Props
     if (!blob) {
       setTtsLoading(true);
       try {
-        const res = await fetch("/api/tts", {
+        const res = await fetch("/api/vocab/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: frontCardWord, speed: 0.9 }),
+          body: JSON.stringify({ rowId: frontCardId }),
         });
         if (!res.ok) throw new Error("TTS failed");
         blob = await res.blob();

@@ -19,6 +19,8 @@ import { getDb } from "./db";
 import { compareVocabDescriptions, generateVocabDescription, normalizeVocab } from "./vocab";
 import { rerankAfterInsert } from "./vocabRanking";
 import { DEFAULT_TARGET } from "./targetLanguage";
+import { generateExplanation } from "./vocabExplain";
+import { generateTts } from "./vocabTts";
 
 export interface SaveVocabArgs {
   userId: number;
@@ -89,6 +91,7 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
       .run(args.userId, original, lower, description, args.context_sentence);
     const rowId = Number(result.lastInsertRowid);
     await rerankAfterInsert(args.userId, rowId);
+    generateAssetsAsync(rowId, args.userId, original, description, args.native_language);
     return {
       action: "inserted",
       rowId,
@@ -125,12 +128,60 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
     .run(args.userId, original, lower, description, args.context_sentence);
   const rowId = Number(result.lastInsertRowid);
   await rerankAfterInsert(args.userId, rowId);
+  generateAssetsAsync(rowId, args.userId, original, description, args.native_language);
   return {
     action: "polysemy_inserted",
     rowId,
     description,
     siblingRowIds: existing.map((r) => r.id),
   };
+}
+
+/**
+ * Fire-and-forget async asset pre-generation. Runs the explain + TTS
+ * calls in parallel right after a new row is inserted. The save
+ * endpoint returns immediately; assets fill in shortly after. Failures
+ * are logged but never propagated — the row exists either way, and
+ * the explain/tts endpoints regenerate missing assets on demand.
+ *
+ * Called only on truly-new inserts (not on synonym merges, where the
+ * matched row already has assets — or will be backfilled).
+ */
+function generateAssetsAsync(
+  rowId: number,
+  userId: number,
+  targetWord: string,
+  englishDescription: string,
+  nativeLanguage: string,
+): void {
+  void Promise.allSettled([
+    generateExplanation({
+      target_word: targetWord,
+      english_description: englishDescription,
+      target_language: DEFAULT_TARGET.language,
+      native_language: nativeLanguage,
+    }).then((res) => {
+      getDb()
+        .prepare(
+          `UPDATE user_vocab SET native_translation = ?, native_hint = ?
+           WHERE id = ? AND user_id = ?`,
+        )
+        .run(res.translation, res.hint, rowId, userId);
+    }),
+    generateTts(targetWord).then((buf) => {
+      getDb()
+        .prepare(
+          `UPDATE user_vocab SET tts_audio = ? WHERE id = ? AND user_id = ?`,
+        )
+        .run(buf, rowId, userId);
+    }),
+  ]).then((results) => {
+    for (const r of results) {
+      if (r.status === "rejected") {
+        console.warn("[vocab/assets] generation failed:", r.reason);
+      }
+    }
+  });
 }
 
 /**
