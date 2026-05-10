@@ -157,12 +157,20 @@ export default function Page() {
             <option value="transcript_aware">Stay close to my words</option>
           </select>
         </label>
-        <button
-          onClick={handleLogout}
-          className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => router.push("/vocab/practice")}
+            className="text-xs text-neutral-500 hover:text-neutral-800 transition-colors"
+          >
+            Vokabeln üben →
+          </button>
+          <button
+            onClick={handleLogout}
+            className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
       <div className="w-full max-w-xl flex flex-col items-center gap-8 flex-1">

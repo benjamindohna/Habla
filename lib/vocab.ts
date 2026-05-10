@@ -513,3 +513,27 @@ export async function canonicalizeVocab(
   }
   return { kind: "save", target, native };
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// SRS scheduling constants. Anki SM-2's typical "good"-trajectory mapped
+// onto a discrete 10-stage ladder. Stage 0 means "fresh / just failed —
+// re-show in 1 minute". Stage 9 means "essentially permanent — re-show
+// in ~4 years". On a "1" verdict the card advances by one stage; on "0"
+// the stage halves (Math.floor(stage / 2)); on "X" nothing happens
+// (the card stays in the queue at the same stage and last_seen).
+// ─────────────────────────────────────────────────────────────────────────
+
+export const STAGE_INTERVALS_SECONDS = [
+  60,           // stage 0:  1 min
+  86_400,       // stage 1:  1 day
+  216_000,      // stage 2:  2.5 days
+  518_400,      // stage 3:  6 days
+  1_296_000,    // stage 4:  15 days
+  3_283_200,    // stage 5:  38 days
+  8_208_000,    // stage 6:  95 days
+  20_736_000,   // stage 7:  240 days  (~8 months)
+  51_840_000,   // stage 8:  600 days  (~1.6 years)
+  129_600_000,  // stage 9:  1500 days (~4 years)
+];
+
+export const MAX_STAGE = STAGE_INTERVALS_SECONDS.length - 1;
