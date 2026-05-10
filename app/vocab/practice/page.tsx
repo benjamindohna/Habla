@@ -305,7 +305,7 @@ export default function VocabPracticePage() {
                   LLM-generated translation + hint. */}
               {stage === "revealed" && (
                 <div
-                  className={`rounded-2xl border p-4 space-y-2 ${
+                  className={`rounded-2xl border p-4 ${
                     revealReason === "three-x"
                       ? "border-amber-200 bg-amber-50"
                       : revealReason === "gave-up"
@@ -326,11 +326,11 @@ export default function VocabPracticePage() {
                   </p>
 
                   {explanation === null ? (
-                    <p className="text-sm italic text-neutral-400">Antwort wird geladen…</p>
+                    <p className="mt-2 text-sm italic text-neutral-400">Antwort wird geladen…</p>
                   ) : (
                     <>
                       <p
-                        className={`text-xl font-medium ${
+                        className={`mt-2 text-xl font-medium ${
                           revealReason === "three-x"
                             ? "text-amber-900"
                             : revealReason === "gave-up"
@@ -342,7 +342,7 @@ export default function VocabPracticePage() {
                       </p>
                       {explanation.hint && (
                         <p
-                          className={`text-sm ${
+                          className={`mt-0.5 text-sm ${
                             revealReason === "three-x"
                               ? "text-amber-800"
                               : revealReason === "gave-up"
@@ -359,7 +359,7 @@ export default function VocabPracticePage() {
                   <button
                     onClick={handleNextAfterReveal}
                     disabled={explanation === null}
-                    className={`mt-2 px-4 py-1.5 rounded-lg text-white text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`mt-4 px-4 py-1.5 rounded-lg text-white text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       revealReason === "three-x"
                         ? "bg-amber-900 hover:bg-amber-800"
                         : revealReason === "gave-up"
