@@ -384,12 +384,12 @@ export default function VocabPracticePage() {
                       onKeyDown={onKeyDown}
                       disabled={inputDisabled}
                       placeholder="Übersetzung eingeben…"
-                      className="flex-1 min-w-0 px-4 py-2.5 rounded-lg border border-neutral-300 bg-white text-base text-neutral-900 focus:border-neutral-600 focus:outline-none disabled:opacity-50"
+                      className="flex-1 min-w-0 h-11 px-4 rounded-lg border border-neutral-300 bg-white text-base text-neutral-900 focus:border-neutral-600 focus:outline-none disabled:opacity-50"
                     />
                     <button
                       onClick={handleSubmit}
                       disabled={inputDisabled || !answer.trim()}
-                      className="shrink-0 px-5 py-2.5 rounded-lg bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="shrink-0 h-11 px-5 rounded-lg bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {stage === "judging" ? "…" : "Antworten"}
                     </button>
@@ -398,7 +398,7 @@ export default function VocabPracticePage() {
                       disabled={inputDisabled}
                       aria-label="Ich weiß die Vokabel nicht"
                       title="Ich weiß die Vokabel nicht"
-                      className="shrink-0 aspect-square rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                      className="shrink-0 h-11 w-11 rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
                     >
                       <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                         <path
