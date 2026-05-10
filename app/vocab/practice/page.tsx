@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import VocabCardStack, { type VocabCardData } from "@/components/VocabCardStack";
 
-type Stage = "loading" | "ready" | "judging" | "feedback-x" | "feedback-0" | "revealed" | "exiting" | "empty" | "error";
+type Stage = "loading" | "ready" | "judging" | "feedback-x" | "revealed" | "exiting" | "empty" | "error";
+
+type RevealReason = "wrong" | "three-x";
 
 interface QueueResponse {
   cards: Array<{
@@ -22,7 +24,11 @@ interface ServerCard extends VocabCardData {
 }
 
 const EXIT_DURATION_MS = 400;
-const MAX_ATTEMPTS_BEFORE_GIVEUP = 3;
+
+// 0 verdicts are immediate fails — no retry. X verdicts (sister-meaning
+// matches) get up to 3 attempts; the third X is treated as a failure
+// because the learner has demonstrated they don't know the tested sense.
+const MAX_X_ATTEMPTS = 3;
 
 export default function VocabPracticePage() {
   const router = useRouter();
@@ -31,8 +37,9 @@ export default function VocabPracticePage() {
   const [cards, setCards] = useState<ServerCard[]>([]);
   const [exitingId, setExitingId] = useState<number | null>(null);
   const [answer, setAnswer] = useState("");
-  const [attempts, setAttempts] = useState(0);
+  const [xAttempts, setXAttempts] = useState(0);
   const [revealedDescription, setRevealedDescription] = useState<string | null>(null);
+  const [revealReason, setRevealReason] = useState<RevealReason | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Initial queue fetch.
@@ -70,22 +77,30 @@ export default function VocabPracticePage() {
 
   // Auto-focus the input whenever a fresh card becomes interactive.
   useEffect(() => {
-    if (stage === "ready" || stage === "feedback-x" || stage === "feedback-0") {
+    if (stage === "ready" || stage === "feedback-x") {
       inputRef.current?.focus();
     }
   }, [stage, cards.length]);
 
   const currentCard = cards[0];
 
-  function resetForNewCard() {
-    setAnswer("");
-    setAttempts(0);
-    setRevealedDescription(null);
-    setStage(cards.length > 1 ? "ready" : "empty");
+  function dismissCurrentAfterCommit() {
+    if (!currentCard) return;
+    setExitingId(currentCard.id);
+    setStage("exiting");
+    setTimeout(() => {
+      setCards((cs) => cs.slice(1));
+      setExitingId(null);
+      setAnswer("");
+      setXAttempts(0);
+      setRevealedDescription(null);
+      setRevealReason(null);
+      setStage((prev) => (prev === "exiting" ? "ready" : prev));
+    }, EXIT_DURATION_MS);
   }
 
   async function handleSubmit() {
-    if (stage !== "ready" && stage !== "feedback-x" && stage !== "feedback-0") return;
+    if (stage !== "ready" && stage !== "feedback-x") return;
     if (!currentCard) return;
     const trimmed = answer.trim();
     if (!trimmed) return;
@@ -101,33 +116,32 @@ export default function VocabPracticePage() {
       const data = (await res.json()) as { result: "1" | "X" | "0"; english_description: string };
 
       if (data.result === "1") {
-        // Commit + exit animation.
         await fetch("/api/vocab/commit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rowId: currentCard.id, result: "1" }),
         }).catch(() => {});
-        setExitingId(currentCard.id);
-        setStage("exiting");
-        setTimeout(() => {
-          setCards((cs) => cs.slice(1));
-          setExitingId(null);
-          // After unmount, the next card slides in and we reset.
-          setAnswer("");
-          setAttempts(0);
-          setRevealedDescription(null);
-          // stage-update happens via the cards-length effect below, but
-          // we set it eagerly so the input re-enables without waiting
-          // for re-render.
-          setStage((prev) => (prev === "exiting" ? "ready" : prev));
-        }, EXIT_DURATION_MS);
+        dismissCurrentAfterCommit();
       } else if (data.result === "X") {
-        setStage("feedback-x");
+        const next = xAttempts + 1;
+        if (next >= MAX_X_ATTEMPTS) {
+          // Three sister-meaning hits without finding the tested sense →
+          // treat as failure. Reveal the description so the user learns
+          // what was being asked, then commit 0 on Weiter click.
+          setRevealedDescription(data.english_description);
+          setRevealReason("three-x");
+          setStage("revealed");
+        } else {
+          setXAttempts(next);
+          setStage("feedback-x");
+        }
         setAnswer("");
       } else {
-        const newAttempts = attempts + 1;
-        setAttempts(newAttempts);
-        setStage("feedback-0");
+        // "0" — direct wrong. No retry. Reveal the description, commit 0
+        // on Weiter click.
+        setRevealedDescription(data.english_description);
+        setRevealReason("wrong");
+        setStage("revealed");
         setAnswer("");
       }
     } catch (err) {
@@ -137,30 +151,14 @@ export default function VocabPracticePage() {
     }
   }
 
-  async function handleGiveUp() {
-    if (!currentCard) return;
-    setRevealedDescription(currentCard.english_description);
-    setStage("revealed");
-  }
-
   async function handleNextAfterReveal() {
     if (!currentCard) return;
-    // Commit the failure now that the user has seen the answer.
     await fetch("/api/vocab/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rowId: currentCard.id, result: "0" }),
     }).catch(() => {});
-    setExitingId(currentCard.id);
-    setStage("exiting");
-    setTimeout(() => {
-      setCards((cs) => cs.slice(1));
-      setExitingId(null);
-      setAnswer("");
-      setAttempts(0);
-      setRevealedDescription(null);
-      setStage((prev) => (prev === "exiting" ? "ready" : prev));
-    }, EXIT_DURATION_MS);
+    dismissCurrentAfterCommit();
   }
 
   // When cards array becomes empty (post-exit), surface the empty state.
@@ -172,6 +170,35 @@ export default function VocabPracticePage() {
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") handleSubmit();
+  }
+
+  // Message shown above the input on X attempts. xAttempts is the count
+  // BEFORE the next attempt — so 1 means "already got 1 X, this is the
+  // 2nd attempt".
+  function feedbackXMessage(): React.ReactNode {
+    if (!currentCard) return null;
+    if (xAttempts === 1) {
+      return (
+        <>
+          Diese Übersetzung ist korrekt, aber wir suchen eine{" "}
+          <strong>andere Bedeutung</strong> von{" "}
+          <strong>{currentCard.target_word_original}</strong>.
+        </>
+      );
+    }
+    return (
+      <>
+        Kannst du an noch eine weitere Übersetzung für{" "}
+        <strong>{currentCard.target_word_original}</strong> denken?
+      </>
+    );
+  }
+
+  function revealHeading(): string {
+    if (revealReason === "three-x") {
+      return "Du hast die gesuchte Bedeutung nicht getroffen. Sie war:";
+    }
+    return "Falsch — die gesuchte Bedeutung war:";
   }
 
   return (
@@ -229,28 +256,49 @@ export default function VocabPracticePage() {
         {(stage === "ready" ||
           stage === "judging" ||
           stage === "feedback-x" ||
-          stage === "feedback-0" ||
           stage === "revealed" ||
           stage === "exiting") &&
           currentCard && (
             <div className="space-y-6">
               <VocabCardStack cards={cards} exitingId={exitingId} />
 
-              {/* Reveal panel — shown after give-up. */}
+              {/* Reveal panel — wrong (single 0) or three-x. */}
               {stage === "revealed" && revealedDescription && (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-2">
-                  <p className="text-xs uppercase tracking-wider text-amber-700">Antwort</p>
-                  <p className="text-sm text-amber-900">{revealedDescription}</p>
+                <div
+                  className={`rounded-2xl border p-4 space-y-2 ${
+                    revealReason === "three-x"
+                      ? "border-amber-200 bg-amber-50"
+                      : "border-rose-200 bg-rose-50"
+                  }`}
+                >
+                  <p
+                    className={`text-xs uppercase tracking-wider ${
+                      revealReason === "three-x" ? "text-amber-700" : "text-rose-700"
+                    }`}
+                  >
+                    {revealHeading()}
+                  </p>
+                  <p
+                    className={`text-sm ${
+                      revealReason === "three-x" ? "text-amber-900" : "text-rose-900"
+                    }`}
+                  >
+                    {revealedDescription}
+                  </p>
                   <button
                     onClick={handleNextAfterReveal}
-                    className="mt-2 px-4 py-1.5 rounded-lg bg-amber-900 text-white text-sm hover:bg-amber-800 transition-colors"
+                    className={`mt-2 px-4 py-1.5 rounded-lg text-white text-sm transition-colors ${
+                      revealReason === "three-x"
+                        ? "bg-amber-900 hover:bg-amber-800"
+                        : "bg-rose-900 hover:bg-rose-800"
+                    }`}
                   >
                     Weiter →
                   </button>
                 </div>
               )}
 
-              {/* Input + submit + feedback. */}
+              {/* Input + submit + X-feedback. */}
               {stage !== "revealed" && (
                 <div className="space-y-3">
                   <div className="flex gap-2">
@@ -274,30 +322,7 @@ export default function VocabPracticePage() {
                   </div>
 
                   {stage === "feedback-x" && (
-                    <p className="text-sm text-amber-700">
-                      Andere Bedeutung von <strong>{currentCard.target_word_original}</strong>. Versuch's
-                      nochmal — wir suchen einen anderen Sinn.
-                    </p>
-                  )}
-
-                  {stage === "feedback-0" && attempts < MAX_ATTEMPTS_BEFORE_GIVEUP && (
-                    <p className="text-sm text-rose-600">
-                      Nicht richtig. Versuch{attempts > 0 ? ` (${attempts}/${MAX_ATTEMPTS_BEFORE_GIVEUP})` : ""}.
-                    </p>
-                  )}
-
-                  {stage === "feedback-0" && attempts >= MAX_ATTEMPTS_BEFORE_GIVEUP && (
-                    <div className="flex items-center justify-between gap-3 text-sm">
-                      <p className="text-rose-600">
-                        {attempts}× nicht richtig.
-                      </p>
-                      <button
-                        onClick={handleGiveUp}
-                        className="text-neutral-500 hover:text-neutral-800 underline"
-                      >
-                        Aufgeben & Antwort sehen
-                      </button>
-                    </div>
+                    <p className="text-sm text-amber-700">{feedbackXMessage()}</p>
                   )}
                 </div>
               )}
