@@ -219,6 +219,7 @@ Be LENIENT on:
 - capitalisation
 - minor inflection differences (singular ≈ plural if the sense is the same)
 - AMBIGUOUS answers that could plausibly mean the tested sense — accept (return 1), even if they could also mean something else.
+- BROADER native-language words whose semantic range INCLUDES the tested sense as a subset. The tested sense is often a precise English description, but native-language translations are commonly polysemous and cover both the tested sense and adjacent senses with a single word. If the answer is a standard, natural ${args.native_language} translation of the target word and ITS MEANING ENCOMPASSES the tested sense, accept (return 1). Example: for "paz" tested as "state of tranquility / calmness", "Frieden" → 1, because "Frieden" encompasses inner peace alongside political peace.
 
 Be STRICT on:
 - actual meaning mismatch — including answers that are only metaphorically, thematically, or distantly related to the tested sense. Accept synonyms only when they share the SAME CORE CONCEPT, not when the link is "both relate to removing something bad" or "both involve change of state". Example: for "limpieza" (cleaning), "Heilung" (healing) → 0, because cleaning and healing are different core concepts even though one might metaphorically be called "spiritual cleansing".
@@ -264,6 +265,13 @@ Tested word: "limpieza" — sense: "act of cleaning, removing dirt"
   "Sauberkeit"         → 1   (related noun, very close core — state of being clean)
   "Heilung"            → 0   (different concept — healing, not cleaning; only metaphorically related)
   "Schmutz"            → 0   (opposite concept)
+
+Tested word: "paz" — sense: "state of tranquility or calmness"
+  "der Frieden"        → 1   (broad German word — encompasses inner peace alongside political peace; covers the tested sense)
+  "Frieden"            → 1   (same, no article)
+  "Ruhe"               → 1   (specifically tranquility/calm — direct hit)
+  "Gelassenheit"       → 1   (emotional calm, very close)
+  "Krieg"              → 0   (opposite concept)
 
 Tested word: "haya impresionado" — sense: "has impressed (subjunctive perfect)"
   "hat beeindruckt"    → 1
