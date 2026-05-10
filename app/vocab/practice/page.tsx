@@ -359,7 +359,7 @@ export default function VocabPracticePage() {
                   <button
                     onClick={handleNextAfterReveal}
                     disabled={explanation === null}
-                    className={`mt-4 px-4 py-1.5 rounded-lg text-white text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`mt-5 px-4 py-1.5 rounded-lg text-white text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       revealReason === "three-x"
                         ? "bg-amber-900 hover:bg-amber-800"
                         : revealReason === "gave-up"
