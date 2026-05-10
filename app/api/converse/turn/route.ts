@@ -3,6 +3,7 @@ import { chatText, type ChatMessage } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
+import { describeLevelForPrompt } from "@/lib/levels";
 import {
   appendMessage,
   getConversation,
@@ -60,13 +61,13 @@ export async function POST(req: NextRequest) {
   const target = describeTargetLanguage(DEFAULT_TARGET);
   const targetName = DEFAULT_TARGET.language;
   const nativeLanguage = user.nativeLanguage;
-  const targetBand = `${user.level + 5}-${user.level + 10}`;
+  const levelBlock = describeLevelForPrompt(user.level);
 
   const systemPrompt = `You are a native ${target} speaker having a casual conversation with a language learner whose native language is ${nativeLanguage}.
 
 Topic of the conversation: "${conversation.topic}"
-Learner level: ${user.level}/100 (0 = absolute beginner, 100 = sophisticated native speaker).
-Aim your replies at roughly level ${targetBand} — slightly above the learner's level to stretch them while staying understandable.
+
+${levelBlock}
 
 Behave like a real chat partner:
 - Engage with what the learner just said. React, agree, disagree, share your own take, or ask a follow-up question.

@@ -3,6 +3,7 @@ import { chatText } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
+import { describeLevelForPrompt } from "@/lib/levels";
 import { appendMessage, createConversation } from "@/lib/conversations";
 
 /**
@@ -26,13 +27,13 @@ export async function POST(req: NextRequest) {
   const target = describeTargetLanguage(DEFAULT_TARGET);
   const targetName = DEFAULT_TARGET.language;
   const nativeLanguage = user.nativeLanguage;
-  const targetBand = `${user.level + 5}-${user.level + 10}`;
+  const levelBlock = describeLevelForPrompt(user.level);
 
   const prompt = `You are a native ${target} speaker opening a casual conversation about a topic with a learner whose native language is ${nativeLanguage}.
 
 Topic: "${topic.trim()}"
-Learner level: ${user.level}/100 (0 = absolute beginner, 100 = sophisticated native speaker).
-Aim at roughly level ${targetBand} — slightly above the learner's level to stretch them while staying understandable.
+
+${levelBlock}
 
 Write a single opening message in ${target} that:
 - Is genuinely interesting and inviting — not a generic "Do you like X?".
