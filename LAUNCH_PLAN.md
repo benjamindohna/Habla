@@ -23,71 +23,41 @@ Total realistisch: **3-4 Arbeitstage**. Phase-Reihenfolge unten.
 
 ---
 
-## Decisions, die VOR dem Bauen zu klären sind
+## Confirmed decisions (2026-05-10)
 
-Bevor wir morgen Code schreiben, brauche ich Antworten auf 5 Fragen.
-Vorschlag pro Punkt mit Begründung — du kannst übernehmen oder ändern.
+Alle 5 Decisions vom User abgenickt am 2026-05-10. Locked-in für die
+Umsetzung.
 
-### D1. Supabase Auth vs. eigener bcrypt-Login?
+### D1. Auth → **Supabase Auth**
 
-**Status quo:** Wir haben eigene bcrypt-Auth in `lib/auth.ts` + Sessions in
-DB. Funktioniert.
+Bringt Password-Reset-Email, optional Email-Verification, Magic-Link
+out of the box. Refactor-Aufwand: ~2-3h für `lib/auth.ts` +
+Sign-Up/Login-Forms im Frontend.
 
-**Supabase Auth** würde liefern: Password-Reset-Email out of the box,
-optional Email-Verification, optional Magic-Link, optional OAuth.
+### D2. Audio-Storage → **BYTEA in Postgres**
 
-**Vorschlag: Supabase Auth.** Begründung: bei Remote-Usern wird
-Password-vergessen-Problem real (`benjamin@…` vergisst sein Passwort, du
-musst dann per SQL bcrypt-hashen — ätzend). Supabase Auth löst das.
-Trade-off: Auth-Code refactorn (~2-3h) statt einfach pg-driver wechseln.
+Gleicher Pattern wie SQLite-BLOB, minimaler Code-Change. 2 User ×
+~500 Vokabel-Audios × ~10KB = ~10MB total — trivial für Postgres.
+Wenn später 50+ User: auf Supabase Storage umstellen.
 
-### D2. Audio-Storage: BYTEA in Postgres oder Supabase Storage?
+### D3. Dev-DB-Daten → **migrieren (Account + 47 Vocab + Assets), Chat-Historie wegwerfen**
 
-**Status quo:** TTS-Audio in SQLite als BLOB-Spalte auf user_vocab.
+Migrations-Skript `scripts/migrateSqliteToSupabase.ts` liest aus
+lokaler `data/habla.db` und schreibt in Postgres. Chat-Verlauf
+(`conversations` + `messages`) bleibt zurück — Test-Daten, kein
+Verlust.
 
-**BYTEA in Postgres**: gleicher Pattern, kleinste Code-Änderung.
-**Supabase Storage**: signed URLs, CDN-Delivery, off-DB. Idiomatischer.
+### D4. Italienische Variante → **Standard-Italienisch, kein regionaler Akzent**
 
-**Vorschlag: BYTEA für jetzt.** Begründung: 2 User × ~500 Vokabel-Audios
-× ~10KB = ~10MB total. Postgres handled das trivial. Storage-Refactor
-wäre 4-6h Mehrarbeit ohne UX-Win bei 2 Usern. Wenn wir später skalieren
-(50+ User), umstellen.
+`TargetLanguageSpec`-Eintrag: `{ language: "Italian", location: null,
+style: "everyday" }`. Italian-spezifische Prompt-Fragmente schreiben
+neutralen Standard, keine Tuscan/Roman/Sicilian-Anspielungen.
 
-### D3. Bestehende Dev-DB-Daten migrieren oder frisch starten?
+### D5. Hosting → **Vercel**
 
-**Status quo:** Lokale SQLite hat dein Test-Account + 47 Vocab-Rows +
-Chat-Verlauf.
-
-**Vorschlag: deinen Account + Vocab migrieren, Chat-Verlauf wegwerfen.**
-Begründung: Vocab + Stages sind echter Trainings-Fortschritt, ärgerlich
-zu verlieren. Chat-Historie ist Test-Daten, kann weg. Migrations-Skript
-liest deine 47 user_vocab-Rows + recent_inputs + Asset-Blobs aus SQLite
-und schreibt sie in Postgres. ~1h Arbeit.
-
-### D4. Italienische Variante: Standard-Italienisch oder regional?
-
-**Status quo:** Spanisch ist hardcoded auf Castellano (Spanien).
-`lib/targetLanguage.ts` hat eine `location`-Eigenschaft pro Sprache.
-
-**Vorschlag: Standard-Italienisch („italiano standard"), kein regionaler
-Akzent.** Begründung: User 2 ist Anfänger (Level 0-3). Wird vermutlich
-keine regionalen Präferenzen haben. Standard-Italienisch ist neutralste
-Wahl. Italienisch hat ohnehin weniger ausgeprägte regionale Schrift-
-Unterschiede als Spanisch (Castellano vs. Latam).
-
-### D5. Hosting-Target?
-
-**Vorschlag: Vercel.** Begründung:
-- Next.js-Native, Zero-Config-Deployment
-- Free-Tier reicht für 2 Test-User
-- Environment-Variablen für Supabase-Connection trivial
-- Auto-Deploy bei `git push` auf branch (wir machen einen `production`-branch)
-
-Alternativen: Railway (Container-basiert, persistent volume möglich aber
-nicht nötig wenn DB extern), Render (ähnlich).
-
-**Vercel + Supabase = Standard-Stack** für Next.js-Apps mit Postgres.
-Alles andere wäre Sonderwunsch.
+Auto-Deploy auf Push, Free-Tier reicht für 2 Test-User. Wenn
+Function-Timeouts > 10s problematisch werden (Korrektur-Pipeline kann
+3-5s dauern), Vercel Pro ($20/mo) für 60s-Timeouts.
 
 ---
 
