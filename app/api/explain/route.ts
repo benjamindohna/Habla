@@ -15,7 +15,7 @@ function sentenceLimits(localSegment: string): { min: number; max: number } {
 }
 
 function buildPromptV1(
-  localVersionEs: string,
+  localVersionTarget: string,
   localSegment: string,
   userSegment: string,
   nativeLanguage: string,
@@ -24,7 +24,7 @@ function buildPromptV1(
   const targetName = DEFAULT_TARGET.language;
   return `You are a helpful ${target} tutor. A learner is studying ${targetName} and wants feedback on a specific part of a sentence.
 
-Full sentence (perfect ${target}): "${localVersionEs}"
+Full sentence (perfect ${target}): "${localVersionTarget}"
 Correct version of this segment: "${localSegment}"
 What the learner said: "${userSegment || "(nothing — this part was left out)"}"
 
@@ -41,7 +41,7 @@ Rules for your response:
 }
 
 function buildPromptV2(
-  localVersionEs: string,
+  localVersionTarget: string,
   localSegment: string,
   userSegment: string,
   nativeLanguage: string,
@@ -52,7 +52,7 @@ function buildPromptV2(
   const wordCount = localSegment.trim().split(/\s+/).filter(Boolean).length;
   return `You are a helpful ${target} tutor. A learner is studying ${targetName} and wants feedback on a specific part of a sentence.
 
-Full sentence (perfect ${target}): "${localVersionEs}"
+Full sentence (perfect ${target}): "${localVersionTarget}"
 Correct version of this segment: "${localSegment}" (${wordCount} word${wordCount === 1 ? "" : "s"})
 What the learner said: "${userSegment || "(nothing — this part was left out)"}"
 
@@ -68,7 +68,7 @@ Rules:
 - Start directly with the feedback. No preamble, no "of course", no "great question", no meta-comments.
 - Every sentence should add something concrete. Cut anything vague or filler.
 
-Worked example (target Spanish, native German):
+Worked example (illustrative — Spanish target, German native; pattern applies to any language pair):
   Segment: "campo de fútbol"
   Learner said: "Fußballfeld"
   Feedback:
@@ -79,14 +79,14 @@ Worked example (target Spanish, native German):
 export async function POST(req: NextRequest) {
   try {
     const {
-      localVersionEs,
+      localVersionTarget,
       localSegment,
       userSegment,
       nativeLanguage = "German",
       explainMini,
       improvedExplainPrompt,
     } = (await req.json()) as {
-      localVersionEs: string;
+      localVersionTarget: string;
       localSegment: string;
       userSegment: string;
       nativeLanguage?: string;
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
       improvedExplainPrompt?: boolean;
     };
 
-    if (!localVersionEs || !localSegment) {
+    if (!localVersionTarget || !localSegment) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
     const explanation = await chatText({
       task,
       label: `explain/${task}${useV2 ? "/v2" : ""}`,
-      userPrompt: buildPrompt(localVersionEs, localSegment, userSegment, nativeLanguage),
+      userPrompt: buildPrompt(localVersionTarget, localSegment, userSegment, nativeLanguage),
       temperature: 0.4,
       maxTokens,
     });

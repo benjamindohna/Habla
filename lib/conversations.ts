@@ -16,7 +16,7 @@ export interface MessageRow {
   id: number;
   conversation_id: number;
   role: MessageRole;
-  text_es: string;
+  text_target: string;
   user_raw: string | null;
   segments_json: string | null;
   created_at: number;
@@ -31,7 +31,7 @@ export interface MessageRow {
 export interface Message {
   id: number;
   role: MessageRole;
-  textEs: string;
+  textTarget: string;
   userRaw: string | null;
   segments: Pair[] | Segment[] | null;
   createdAt: number;
@@ -41,7 +41,7 @@ function rowToMessage(row: MessageRow): Message {
   return {
     id: row.id,
     role: row.role,
-    textEs: row.text_es,
+    textTarget: row.text_target,
     userRaw: row.user_raw,
     segments: row.segments_json ? JSON.parse(row.segments_json) : null,
     createdAt: row.created_at,
@@ -72,19 +72,19 @@ export function getMessages(conversationId: number): Message[] {
 export function appendMessage(input: {
   conversationId: number;
   role: MessageRole;
-  textEs: string;
+  textTarget: string;
   userRaw?: string | null;
   segments?: Pair[] | Segment[] | null;
 }): number {
   const result = getDb()
     .prepare(
-      `INSERT INTO messages (conversation_id, role, text_es, user_raw, segments_json)
+      `INSERT INTO messages (conversation_id, role, text_target, user_raw, segments_json)
        VALUES (?, ?, ?, ?, ?)`,
     )
     .run(
       input.conversationId,
       input.role,
-      input.textEs,
+      input.textTarget,
       input.userRaw ?? null,
       input.segments ? JSON.stringify(input.segments) : null,
     );

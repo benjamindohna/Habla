@@ -61,7 +61,7 @@ export default function CorrectionBlock({
     fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: result.local_version_es, speed: 1.0 }),
+      body: JSON.stringify({ text: result.local_version_target, speed: 1.0 }),
     })
       .then((r) => (r.ok ? r.blob() : null))
       .then((blob) => {
@@ -137,7 +137,7 @@ export default function CorrectionBlock({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          localVersionEs: result.local_version_es,
+          localVersionTarget: result.local_version_target,
           localSegment: pair.local_segment,
           userSegment: pair.user_segment,
           nativeLanguage,
@@ -185,7 +185,7 @@ export default function CorrectionBlock({
         const res = await fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: result.local_version_es, speed }),
+          body: JSON.stringify({ text: result.local_version_target, speed }),
         });
         if (!res.ok) throw new Error("TTS failed");
         blob = await res.blob();
@@ -383,7 +383,7 @@ function PairChip({ pair, isSelected, onClick }: PairChipProps) {
       >
         {user}
       </span>
-      {/* Local Spanish — primary text with green highlight */}
+      {/* Local target-language segment — primary text with green highlight */}
       <span
         className={`inline-block rounded px-1.5 pt-[2px] pb-[4px] leading-none transition-colors ${
           isSelected

@@ -45,7 +45,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const currentInterests = getUserInterests(user.id);
 
   const transcript = messages
-    .map((m) => (m.role === "ai" ? `AI: ${m.textEs}` : `LEARNER: ${m.textEs}`))
+    .map((m) => (m.role === "ai" ? `AI: ${m.textTarget}` : `LEARNER: ${m.textTarget}`))
     .join("\n");
 
   const prompt = `You are curating a learner's interest profile based on a conversation they just had.

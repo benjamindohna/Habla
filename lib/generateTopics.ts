@@ -4,7 +4,7 @@ import { getUserById } from "./users";
 import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
 
 export interface Topic {
-  es: string;
+  target: string;
   native: string;
   kind: "match" | "related" | "random";
 }
@@ -52,15 +52,15 @@ Topic phrasing rules:
 - Mix vague ("Champions League") and specific ("Johan Cruijff's playing philosophy"). Variety helps.
 - Avoid generic single-word nouns when a more inviting phrasing is possible.
 - Do not produce duplicates within this set, and do not near-duplicate any item in the exclusion list.
-- The "es" field must be phrased in ${target} — use vocabulary, named entities, and idioms appropriate to that variety.
+- The "target" field must be phrased in ${target} — use vocabulary, named entities, and idioms appropriate to that variety.
 
 Return ONLY valid JSON in this shape:
 {
   "topics": [
-    { "es": "<phrasing in ${target}>", "native": "<${nativeLanguage} phrasing>", "kind": "match" | "related" | "random" }
+    { "target": "<phrasing in ${target}>", "native": "<${nativeLanguage} phrasing>", "kind": "match" | "related" | "random" }
   ]
 }
-The "topics" array must have exactly 9 items. The field is named "es" for historical reasons but must contain ${targetName}.`;
+The "topics" array must have exactly 9 items.`;
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -111,7 +111,7 @@ export async function generateTopicsForUser(
   const valid = topics.filter(
     (t) =>
       t &&
-      typeof t.es === "string" &&
+      typeof t.target === "string" &&
       typeof t.native === "string" &&
       (t.kind === "match" || t.kind === "related" || t.kind === "random"),
   );

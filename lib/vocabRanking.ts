@@ -22,6 +22,7 @@
 
 import { chatJSON } from "./llm";
 import { getDb } from "./db";
+import { DEFAULT_TARGET } from "./targetLanguage";
 
 const BULK_SORT_THRESHOLD = 15;
 
@@ -66,11 +67,12 @@ export async function rerankAfterInsert(userId: number, newRowId: number): Promi
 
 async function bulkSortAll(userId: number, rows: VocabRow[]): Promise<void> {
   const items = rows.map((r) => formatItem(r));
-  const prompt = `You are sorting a learner's Spanish vocabulary list by importance for mastering Spanish.
+  const targetName = DEFAULT_TARGET.language;
+  const prompt = `You are sorting a learner's ${targetName} vocabulary list by importance for mastering ${targetName}.
 
-Importance criterion: how fundamental and frequent the word (or phrase) is in everyday Spanish. Most important first (high-frequency core vocabulary that any Spanish learner needs early), least important last (rare, specialised, niche).
+Importance criterion: how fundamental and frequent the word (or phrase) is in everyday ${targetName}. Most important first (high-frequency core vocabulary that any ${targetName} learner needs early), least important last (rare, specialised, niche).
 
-Do NOT weight by the learner's personal interests. Sort PURELY by linguistic importance for any Spanish learner.
+Do NOT weight by the learner's personal interests. Sort PURELY by linguistic importance for any ${targetName} learner.
 
 Items to sort (each is "word — description"):
 ${items.map((s, i) => `${i + 1}. ${s}`).join("\n")}
@@ -185,9 +187,10 @@ async function compareToAnchors(
   b: VocabRow,
   c: VocabRow,
 ): Promise<AnchorPosition> {
-  const prompt = `You are placing a new Spanish vocabulary item into an importance-sorted list.
+  const targetName = DEFAULT_TARGET.language;
+  const prompt = `You are placing a new ${targetName} vocabulary item into an importance-sorted list.
 
-Importance criterion: how fundamental and frequent the word (or phrase) is in everyday Spanish. Most important first.
+Importance criterion: how fundamental and frequent the word (or phrase) is in everyday ${targetName}. Most important first.
 
 Three anchor items, presented in importance order (A more important than B more important than C):
 A: "${formatItem(a)}"

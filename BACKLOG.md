@@ -8,6 +8,7 @@ Things to do later — out of scope for the current phase but tracked so they do
 
 **Trigger:** Phase 4-7 (target-language threading)
 **Status:** deferred until a settings UI exists or a user other than admin needs a different language
+**See also:** `TARGET_LANGUAGE_MIGRATION.md` — full audit + phased plan (A/B done, C/D/E pending). This backlog item maps to Phase D there.
 
 `lib/targetLanguage.ts` currently exports a single `DEFAULT_TARGET` (`Spanish` / `castellano` / `everyday`) used by every prompt. When per-user differentiation is needed:
 

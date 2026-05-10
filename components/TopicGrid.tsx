@@ -1,7 +1,7 @@
 "use client";
 
 export interface Topic {
-  es: string;
+  target: string;
   native: string;
 }
 
@@ -24,10 +24,11 @@ export default function TopicGrid({ topics, onSelect, disabled = false }: TopicG
         >
           {topic ? (
             <>
-              <span className="text-sm text-neutral-800 leading-snug">{topic.es}</span>
+              <span className="text-sm text-neutral-800 leading-snug">{topic.target}</span>
               {/* Wrapper snaps from h-0 to h-auto on hover (no slide reveal);
                   the inner span fades in with an opacity transition. Result:
-                  Spanish re-centers instantly, German just blends in. */}
+                  the target-language label re-centers instantly, the
+                  native-language hint just blends in. */}
               <div className="h-0 group-hover:h-auto group-focus-visible:h-auto overflow-hidden">
                 <span className="block pt-1 text-xs text-neutral-400 leading-tight opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-200 ease-out">
                   {topic.native}

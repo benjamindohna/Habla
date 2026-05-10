@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
       ? { intended_meaning_native: override, confidence: "high" as const, notes_native: "" }
       : await interpret(transcript, nativeLanguage);
 
-    const local_version_es = await localize({
+    const local_version_target = await localize({
       intendedMeaning: interpretation.intended_meaning_native,
       transcript,
       nativeLanguage,
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     const pairs = await segment({
       transcript,
-      localVersionEs: local_version_es,
+      localVersionTarget: local_version_target,
       nativeLanguage,
       task: segmentTask,
       improvedPrompt: useImprovedSegmentPrompt,
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
     const result: CorrectionResult = {
       transcript_raw: transcript,
       intended_meaning_native: interpretation.intended_meaning_native,
-      local_version_es,
+      local_version_target,
       confidence: interpretation.confidence,
       notes_native: interpretation.notes_native,
       pairs,

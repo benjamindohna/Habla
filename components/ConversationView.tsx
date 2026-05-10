@@ -12,7 +12,7 @@ type CorrectionStyle = "natural" | "transcript_aware";
 export interface InitialMessage {
   id: number;
   role: "ai" | "user";
-  textEs: string;
+  textTarget: string;
   // We don't reconstruct the full CorrectionResult for past user
   // turns; they render as SealedUserBubbles.
 }
@@ -29,7 +29,7 @@ interface ConversationViewProps {
 
 type Message =
   | { id: string; role: "ai"; text?: string; muted?: boolean; loading?: boolean; isFresh?: boolean }
-  | { id: string; role: "user-sealed"; textEs: string }
+  | { id: string; role: "user-sealed"; textTarget: string }
   | { id: string; role: "user"; result: CorrectionResult; doneAt: number | null; isFresh?: boolean };
 
 type PendingStatus =
@@ -78,8 +78,8 @@ export default function ConversationView({
   const [messages, setMessages] = useState<Message[]>(() =>
     initialMessages.map((m) =>
       m.role === "ai"
-        ? ({ id: `seed-${m.id}`, role: "ai", text: m.textEs } as Message)
-        : ({ id: `seed-${m.id}`, role: "user-sealed", textEs: m.textEs } as Message),
+        ? ({ id: `seed-${m.id}`, role: "ai", text: m.textTarget } as Message)
+        : ({ id: `seed-${m.id}`, role: "user-sealed", textTarget: m.textTarget } as Message),
     ),
   );
   const [pending, setPending] = useState<PendingStatus>({ stage: "idle" });
@@ -172,7 +172,7 @@ export default function ConversationView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversationId,
-          userTextEs: userMsg.result.local_version_es,
+          userTextTarget: userMsg.result.local_version_target,
           userRaw: userMsg.result.transcript_raw,
           segments: userMsg.result.pairs,
         }),
@@ -268,14 +268,14 @@ export default function ConversationView({
               );
             }
             if (msg.role === "user-sealed") {
-              return <SealedUserBubble key={msg.id} textEs={msg.textEs} />;
+              return <SealedUserBubble key={msg.id} textTarget={msg.textTarget} />;
             }
             // User turn that's already been Done'd → collapse the rich
             // correction view into a sealed bubble. The full view stays
             // only for the latest unfinished user turn.
             if (msg.doneAt !== null) {
               return (
-                <SealedUserBubble key={msg.id} textEs={msg.result.local_version_es} />
+                <SealedUserBubble key={msg.id} textTarget={msg.result.local_version_target} />
               );
             }
             return (

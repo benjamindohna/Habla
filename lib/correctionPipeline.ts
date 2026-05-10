@@ -68,7 +68,7 @@ Rules:
 - End with appropriate punctuation.
 
 Return ONLY valid JSON:
-{ "local_version_es": "string" }`;
+{ "local_version_target": "string" }`;
 }
 
 function transcriptAwarePrompt(nativeLanguage: string): string {
@@ -94,7 +94,7 @@ Other rules:
 - End with appropriate punctuation.
 
 Return ONLY valid JSON:
-{ "local_version_es": "string" }`;
+{ "local_version_target": "string" }`;
 }
 
 export async function localize(args: {
@@ -116,7 +116,7 @@ export async function localize(args: {
     : args.intendedMeaning;
 
   const task = args.task ?? "chat_precise";
-  const result = await chatJSON<{ local_version_es?: string }>({
+  const result = await chatJSON<{ local_version_target?: string }>({
     task,
     label: `localize/${task}`,
     messages: [
@@ -124,7 +124,7 @@ export async function localize(args: {
       { role: "user", content: userContent },
     ],
   });
-  return (result.local_version_es ?? "").trim();
+  return (result.local_version_target ?? "").trim();
 }
 
 // ── segment ──────────────────────────────────────────────────────────────
@@ -139,7 +139,7 @@ export async function localize(args: {
  */
 function segmentPromptV2(
   nativeLanguage: string,
-  localVersionEs: string,
+  localVersionTarget: string,
   transcript: string,
 ): string {
   const target = describeTargetLanguage(DEFAULT_TARGET);
@@ -151,7 +151,7 @@ Your job: compare two sentences and produce ordered segment pairs showing the le
 The learner's native language: ${nativeLanguage}
 The target language: ${target}
 
-LOCAL:   "${localVersionEs}"      (the perfect ${target} sentence)
+LOCAL:   "${localVersionTarget}"      (the perfect ${target} sentence)
 LEARNER: "${transcript}"          (what the learner actually said — may mix ${targetName} and ${nativeLanguage}, may have grammar errors, may be entirely in ${nativeLanguage})
 
 ═════ COVERAGE INVARIANTS (absolute, trump everything else) ═════
@@ -190,7 +190,7 @@ E. If you cannot satisfy A-D with a multi-pair alignment, return ONE pair contai
 - Numbers as words, never digits.
 - No markdown, no commentary outside the JSON.
 
-═════ WORKED EXAMPLES (target Spanish, learner native German) ═════
+═════ WORKED EXAMPLES (illustrative — Spanish target, German native; rules apply to any language pair) ═════
 
 EXAMPLE 1 — mixed native fallback in user input:
 LOCAL:   "Voy a un campo de fútbol con mis amigos."
@@ -250,7 +250,7 @@ Return ONLY valid JSON:
 }`;
 }
 
-function segmentPrompt(nativeLanguage: string, localVersionEs: string, transcript: string): string {
+function segmentPrompt(nativeLanguage: string, localVersionTarget: string, transcript: string): string {
   const target = describeTargetLanguage(DEFAULT_TARGET);
   const targetName = DEFAULT_TARGET.language;
   return `You are a sentence-alignment engine for language learning.
@@ -264,7 +264,7 @@ You are given two sentences:
 
 Your job is to compare these two sentences and produce an ordered list of segment pairs that shows the learner exactly which parts they got right and which parts differ.
 
-LOCAL:   "${localVersionEs}"
+LOCAL:   "${localVersionTarget}"
 LEARNER: "${transcript}"
 
 Alignment rules:
@@ -301,7 +301,7 @@ Alignment rules:
 20. Commas and inline punctuation (,  ;  :) must NEVER appear as standalone segments. Always attach them to the segment that immediately precedes them. A segment whose entire content is punctuation is always wrong.
 21. When deciding is_match, ignore trailing punctuation entirely. If two segments are identical except that one has a trailing comma and the other does not, they are a match. Punctuation differences alone must never cause a mismatch.
 
-Matching examples (learner language: German):
+Matching examples (illustrative — German learner, rules apply to any native language):
 - Learner: "con mi Freunde" / LOCAL: "con mis amigos" → "con" matched, "mis amigos" vs "mi Freunde" mismatch
 - Learner: "in un Fußballfeld" / LOCAL: "en un campo de fútbol" → "en un" matched (if truly aligned), "campo de fútbol" vs "Fußballfeld" mismatch
 - Learner: "y el Schiedsrichter fue muy fair" / LOCAL: "y el árbitro fue muy justo" → "y" matched, "el árbitro" vs "el Schiedsrichter" mismatch, "fue muy" matched, "justo" vs "fair" mismatch
@@ -373,7 +373,7 @@ export function normalizePairs(pairs: Pair[]): Pair[] {
   });
 }
 
-function warnIfCoverageBroken(pairs: Pair[], transcript: string, localVersionEs: string) {
+function warnIfCoverageBroken(pairs: Pair[], transcript: string, localVersionTarget: string) {
   const norm = (s: string) =>
     s
       .toLowerCase()
@@ -384,7 +384,7 @@ function warnIfCoverageBroken(pairs: Pair[], transcript: string, localVersionEs:
   const joinedUser = norm(pairs.map((p) => p.user_segment).join(" "));
   const joinedLocal = norm(pairs.map((p) => p.local_segment).join(" "));
   const expectedUser = norm(transcript);
-  const expectedLocal = norm(localVersionEs);
+  const expectedLocal = norm(localVersionTarget);
 
   if (joinedUser !== expectedUser) {
     console.warn(
@@ -402,7 +402,7 @@ function warnIfCoverageBroken(pairs: Pair[], transcript: string, localVersionEs:
 
 export async function segment(args: {
   transcript: string;
-  localVersionEs: string;
+  localVersionTarget: string;
   nativeLanguage: string;
   /** Override the model tier. Production default is chat_light
    *  (gpt-4o-mini): empirically mini does BETTER segmentation than 4o
@@ -421,9 +421,9 @@ export async function segment(args: {
   const { pairs } = await chatJSON<{ pairs: Pair[] }>({
     task,
     label: `segment/${task}${useV2 ? "/v2" : ""}`,
-    userPrompt: buildPrompt(args.nativeLanguage, args.localVersionEs, args.transcript),
+    userPrompt: buildPrompt(args.nativeLanguage, args.localVersionTarget, args.transcript),
   });
   const normalized = normalizePairs(pairs);
-  warnIfCoverageBroken(normalized, args.transcript, args.localVersionEs);
+  warnIfCoverageBroken(normalized, args.transcript, args.localVersionTarget);
   return normalized;
 }

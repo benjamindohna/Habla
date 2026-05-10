@@ -63,7 +63,7 @@ Return ONLY the message text in ${targetName}. No JSON, no quotes, no preamble, 
     appendMessage({
       conversationId,
       role: "ai",
-      textEs: text,
+      textTarget: text,
       segments: null,
     });
 

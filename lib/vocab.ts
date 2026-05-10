@@ -226,7 +226,7 @@ Output exactly ONE character, no other text:
 - X  the answer UNAMBIGUOUSLY refers to a DIFFERENT sense of "${args.target_word}" — use your own linguistic knowledge of ${args.target_language} to recognise alternative meanings; you are NOT given a list of other known senses. Reserve X for answers that can ONLY mean a different sense, never for answers that could plausibly mean the tested sense.
 - 0  the answer is wrong, empty, or just echoes the target word
 
-Examples (target Spanish, native German):
+Examples (illustrative — Spanish target, German native; rules apply to any language pair):
 
 Tested word: "banco" — sense: "long bench to sit on"
   "Sitzbank"           → 1

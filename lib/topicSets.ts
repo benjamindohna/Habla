@@ -53,7 +53,7 @@ export function getExclusionList(userId: number): string[] {
   const seen = new Set<string>();
   for (const r of rows) {
     const topics = JSON.parse(r.topics_json) as Topic[];
-    for (const t of topics) seen.add(t.es);
+    for (const t of topics) seen.add(t.target);
   }
   return Array.from(seen);
 }

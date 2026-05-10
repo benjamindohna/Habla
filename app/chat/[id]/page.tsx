@@ -26,7 +26,7 @@ interface ConversationData {
   messages: Array<{
     id: number;
     role: "ai" | "user";
-    textEs: string;
+    textTarget: string;
   }>;
 }
 
@@ -100,7 +100,7 @@ export default function ChatPage() {
   const initialMessages: InitialMessage[] = state.data.messages.map((m) => ({
     id: m.id,
     role: m.role,
-    textEs: m.textEs,
+    textTarget: m.textTarget,
   }));
 
   return (

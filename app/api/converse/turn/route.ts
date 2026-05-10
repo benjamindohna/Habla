@@ -24,17 +24,17 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => ({}))) as {
     conversationId?: number;
-    userTextEs?: string;
+    userTextTarget?: string;
     userRaw?: string;
     segments?: Pair[];
   };
-  const { conversationId, userTextEs, userRaw, segments } = body;
+  const { conversationId, userTextTarget, userRaw, segments } = body;
 
   if (typeof conversationId !== "number" || !conversationId) {
     return NextResponse.json({ error: "conversationId required" }, { status: 400 });
   }
-  if (typeof userTextEs !== "string" || !userTextEs.trim()) {
-    return NextResponse.json({ error: "userTextEs required" }, { status: 400 });
+  if (typeof userTextTarget !== "string" || !userTextTarget.trim()) {
+    return NextResponse.json({ error: "userTextTarget required" }, { status: 400 });
   }
 
   const conversation = getConversation(conversationId);
@@ -47,14 +47,14 @@ export async function POST(req: NextRequest) {
   appendMessage({
     conversationId,
     role: "user",
-    textEs: userTextEs.trim(),
+    textTarget: userTextTarget.trim(),
     userRaw: userRaw?.trim() || null,
     segments: segments ?? null,
   });
 
-  // Rebuild the message history for the model. AI sees the corrected text_es
-  // for user turns (not the raw transcript) so it engages with what the user
-  // *meant*, not what they accidentally said.
+  // Rebuild the message history for the model. AI sees the corrected
+  // target-language text for user turns (not the raw transcript) so it
+  // engages with what the user *meant*, not what they accidentally said.
   const history = getMessages(conversationId);
 
   const target = describeTargetLanguage(DEFAULT_TARGET);
@@ -84,7 +84,7 @@ Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no
   for (const m of history) {
     messages.push({
       role: m.role === "ai" ? "assistant" : "user",
-      content: m.textEs,
+      content: m.textTarget,
     });
   }
 
@@ -104,7 +104,7 @@ Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no
     appendMessage({
       conversationId,
       role: "ai",
-      textEs: text,
+      textTarget: text,
       segments: null,
     });
 

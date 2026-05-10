@@ -108,20 +108,20 @@ export default function Page() {
 
   async function enterChat(topic: Topic) {
     if (starting) return;
-    setStarting(topic.es);
+    setStarting(topic.target);
     // Fire-and-forget: record the tap so future topic generations drift toward
     // what the user actually engages with. Failure is non-blocking.
     fetch("/api/me/interests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ interest: topic.es }),
+      body: JSON.stringify({ interest: topic.target }),
     }).catch(() => {});
 
     try {
       const res = await fetch("/api/converse/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: topic.es }),
+        body: JSON.stringify({ topic: topic.target }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { conversationId: number; text: string };
