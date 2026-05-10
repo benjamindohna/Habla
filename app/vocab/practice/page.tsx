@@ -15,7 +15,6 @@ interface QueueResponse {
     english_description: string;
     stage: number;
     last_seen: number;
-    lapses: number;
   }>;
 }
 

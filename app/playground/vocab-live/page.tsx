@@ -11,7 +11,6 @@ interface Row {
   stage: number;
   next_due_at: number | null;
   correct_streak: number;
-  lapses: number;
   looked_up: number;
   last_seen: number;
   created_at: number;

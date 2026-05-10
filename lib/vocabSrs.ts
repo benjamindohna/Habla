@@ -21,7 +21,6 @@ export interface DueVocabRow {
   english_description: string;
   stage: number;
   last_seen: number;
-  lapses: number;
 }
 
 /**
@@ -38,7 +37,7 @@ export function getDueVocabQueue(userId: number, limit: number = 30): DueVocabRo
     .map((seconds, stage) => `WHEN ${stage} THEN ${seconds}`)
     .join(" ");
   const sql = `
-    SELECT id, target_word_original, english_description, stage, last_seen, lapses
+    SELECT id, target_word_original, english_description, stage, last_seen
     FROM user_vocab
     WHERE user_id = ?
       AND last_seen + (CASE stage ${caseClauses} ELSE ${STAGE_INTERVALS_SECONDS[MAX_STAGE]} END) <= ?
@@ -52,7 +51,7 @@ export function getDueVocabQueue(userId: number, limit: number = 30): DueVocabRo
  * Apply the SRS state change for a row given the judge verdict.
  *
  * "1": stage = MIN(MAX_STAGE, stage + 1); last_seen = now.
- * "0": stage = MAX(0, FLOOR(stage / 2)); lapses += 1; last_seen = now.
+ * "0": stage = MAX(0, FLOOR(stage / 2)); last_seen = now.
  * "X": no-op — caller should not invoke this with X verdicts. The card
  *      remains in the queue at the same stage and last_seen.
  */
@@ -68,10 +67,10 @@ export function applyJudgeResult(rowId: number, userId: number, judge: VocabJudg
        WHERE id = ? AND user_id = ?`,
     ).run(MAX_STAGE, now, rowId, userId);
   } else {
-    // "0" — wrong answer. Halve the stage (floor), increment lapses.
+    // "0" — wrong answer. Halve the stage (floor).
     db.prepare(
       `UPDATE user_vocab
-       SET stage = MAX(0, stage / 2), last_seen = ?, lapses = lapses + 1
+       SET stage = MAX(0, stage / 2), last_seen = ?
        WHERE id = ? AND user_id = ?`,
     ).run(now, rowId, userId);
   }

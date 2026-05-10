@@ -135,28 +135,26 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
 
 /**
  * Soft-lapse a row when the user re-looks-up the same sense — they
- * needed the translation again, so retention is imperfect. Drop SRS
- * stage by 1 (down to a minimum of 0). Cooldown of 5 minutes prevents
- * over-punishing rapid re-checks of the same conversation bubble.
+ * needed the translation again, so retention is imperfect. Halves the
+ * SRS stage (Math.floor) — same penalty as a test-mode "0" verdict.
+ * Cooldown of 5 minutes on the stage halving prevents over-punishing
+ * rapid re-checks of the same conversation bubble.
+ *
+ * looked_up is incremented on EVERY tap, regardless of cooldown — the
+ * counter is a faithful tap-count for analytics, not gated by SRS
+ * scheduling. last_seen is also always updated.
  */
 function softLapseIfDue(userId: number, rowId: number): void {
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
   const cutoff = now - SOFT_LAPSE_COOLDOWN_SECONDS;
+  // Single round-trip: the CASE reads the OLD last_seen against cutoff,
+  // so the halving applies only when this tap is more than 5 minutes
+  // after the previous one. looked_up + last_seen are unconditional.
   db.prepare(
     `UPDATE user_vocab
-     SET stage = MAX(0, stage - 1),
-         lapses = lapses + 1,
+     SET stage = CASE WHEN last_seen < ? THEN MAX(0, stage / 2) ELSE stage END,
          looked_up = looked_up + 1,
-         last_seen = ?
-     WHERE id = ? AND user_id = ? AND last_seen < ?`,
-  ).run(now, rowId, userId, cutoff);
-
-  // Always bump looked_up + last_seen even when the cooldown skips the
-  // stage drop — we want to know the user touched the word again.
-  db.prepare(
-    `UPDATE user_vocab
-     SET looked_up = CASE WHEN last_seen >= ? THEN looked_up + 1 ELSE looked_up END,
          last_seen = ?
      WHERE id = ? AND user_id = ?`,
   ).run(cutoff, now, rowId, userId);
