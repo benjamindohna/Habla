@@ -6,7 +6,7 @@ import VocabCardStack, { type VocabCardData } from "@/components/VocabCardStack"
 
 type Stage = "loading" | "ready" | "judging" | "feedback-x" | "revealed" | "exiting" | "empty" | "error";
 
-type RevealReason = "wrong" | "three-x";
+type RevealReason = "wrong" | "three-x" | "gave-up";
 
 interface QueueResponse {
   cards: Array<{
@@ -21,6 +21,11 @@ interface QueueResponse {
 
 interface ServerCard extends VocabCardData {
   english_description: string;
+}
+
+interface Explanation {
+  translation: string;
+  hint: string;
 }
 
 const EXIT_DURATION_MS = 400;
@@ -38,7 +43,9 @@ export default function VocabPracticePage() {
   const [exitingId, setExitingId] = useState<number | null>(null);
   const [answer, setAnswer] = useState("");
   const [xAttempts, setXAttempts] = useState(0);
-  const [revealedDescription, setRevealedDescription] = useState<string | null>(null);
+  // Native-language explanation fetched on entering revealed state.
+  // null while in flight, populated when /api/vocab/explain returns.
+  const [explanation, setExplanation] = useState<Explanation | null>(null);
   const [revealReason, setRevealReason] = useState<RevealReason | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -93,10 +100,33 @@ export default function VocabPracticePage() {
       setExitingId(null);
       setAnswer("");
       setXAttempts(0);
-      setRevealedDescription(null);
+      setExplanation(null);
       setRevealReason(null);
       setStage((prev) => (prev === "exiting" ? "ready" : prev));
     }, EXIT_DURATION_MS);
+  }
+
+  /** Fetch the native-language translation + hint for the given card.
+   *  Sets explanation to a fallback string on failure so the Weiter
+   *  button is not blocked. */
+  async function fetchExplanation(rowId: number) {
+    setExplanation(null);
+    try {
+      const res = await fetch("/api/vocab/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowId }),
+      });
+      if (!res.ok) throw new Error(`Explain failed (HTTP ${res.status})`);
+      const data = (await res.json()) as Explanation;
+      setExplanation({
+        translation: data.translation || "(keine Übersetzung)",
+        hint: data.hint ?? "",
+      });
+    } catch (err) {
+      console.error("[vocab/explain]", err);
+      setExplanation({ translation: "(Konnte Antwort nicht laden)", hint: "" });
+    }
   }
 
   async function handleSubmit() {
@@ -125,30 +155,37 @@ export default function VocabPracticePage() {
       } else if (data.result === "X") {
         const next = xAttempts + 1;
         if (next >= MAX_X_ATTEMPTS) {
-          // Three sister-meaning hits without finding the tested sense →
-          // treat as failure. Reveal the description so the user learns
-          // what was being asked, then commit 0 on Weiter click.
-          setRevealedDescription(data.english_description);
           setRevealReason("three-x");
           setStage("revealed");
+          setAnswer("");
+          fetchExplanation(currentCard.id);
         } else {
           setXAttempts(next);
           setStage("feedback-x");
+          setAnswer("");
         }
-        setAnswer("");
       } else {
-        // "0" — direct wrong. No retry. Reveal the description, commit 0
-        // on Weiter click.
-        setRevealedDescription(data.english_description);
+        // "0" — direct wrong, no retry.
         setRevealReason("wrong");
         setStage("revealed");
         setAnswer("");
+        fetchExplanation(currentCard.id);
       }
     } catch (err) {
       console.error("[vocab/judge]", err);
       setErrorMessage((err as Error).message);
       setStage("error");
     }
+  }
+
+  /** "I don't know" button — user gives up before seeing a verdict. */
+  async function handleDontKnow() {
+    if (stage !== "ready" && stage !== "feedback-x") return;
+    if (!currentCard) return;
+    setRevealReason("gave-up");
+    setStage("revealed");
+    setAnswer("");
+    fetchExplanation(currentCard.id);
   }
 
   async function handleNextAfterReveal() {
@@ -172,9 +209,6 @@ export default function VocabPracticePage() {
     if (e.key === "Enter") handleSubmit();
   }
 
-  // Message shown above the input on X attempts. xAttempts is the count
-  // BEFORE the next attempt — so 1 means "already got 1 X, this is the
-  // 2nd attempt".
   function feedbackXMessage(): React.ReactNode {
     if (!currentCard) return null;
     if (xAttempts === 1) {
@@ -196,10 +230,15 @@ export default function VocabPracticePage() {
 
   function revealHeading(): string {
     if (revealReason === "three-x") {
-      return "Du hast die gesuchte Bedeutung nicht getroffen. Sie war:";
+      return "Du hast die gesuchte Bedeutung nicht getroffen.";
     }
-    return "Falsch — die gesuchte Bedeutung war:";
+    if (revealReason === "gave-up") {
+      return "Antwort:";
+    }
+    return "Falsch — die Antwort war:";
   }
+
+  const inputDisabled = stage === "judging" || stage === "exiting";
 
   return (
     <main className="min-h-screen bg-neutral-50">
@@ -262,34 +301,69 @@ export default function VocabPracticePage() {
             <div className="space-y-6">
               <VocabCardStack cards={cards} exitingId={exitingId} />
 
-              {/* Reveal panel — wrong (single 0) or three-x. */}
-              {stage === "revealed" && revealedDescription && (
+              {/* Reveal panel — wrong / three-x / gave-up. Shows the
+                  LLM-generated translation + hint. */}
+              {stage === "revealed" && (
                 <div
                   className={`rounded-2xl border p-4 space-y-2 ${
                     revealReason === "three-x"
                       ? "border-amber-200 bg-amber-50"
+                      : revealReason === "gave-up"
+                      ? "border-neutral-200 bg-white"
                       : "border-rose-200 bg-rose-50"
                   }`}
                 >
                   <p
                     className={`text-xs uppercase tracking-wider ${
-                      revealReason === "three-x" ? "text-amber-700" : "text-rose-700"
+                      revealReason === "three-x"
+                        ? "text-amber-700"
+                        : revealReason === "gave-up"
+                        ? "text-neutral-500"
+                        : "text-rose-700"
                     }`}
                   >
                     {revealHeading()}
                   </p>
-                  <p
-                    className={`text-sm ${
-                      revealReason === "three-x" ? "text-amber-900" : "text-rose-900"
-                    }`}
-                  >
-                    {revealedDescription}
-                  </p>
+
+                  {explanation === null ? (
+                    <p className="text-sm italic text-neutral-400">Antwort wird geladen…</p>
+                  ) : (
+                    <>
+                      <p
+                        className={`text-xl font-medium ${
+                          revealReason === "three-x"
+                            ? "text-amber-900"
+                            : revealReason === "gave-up"
+                            ? "text-neutral-900"
+                            : "text-rose-900"
+                        }`}
+                      >
+                        {explanation.translation}
+                      </p>
+                      {explanation.hint && (
+                        <p
+                          className={`text-sm ${
+                            revealReason === "three-x"
+                              ? "text-amber-800"
+                              : revealReason === "gave-up"
+                              ? "text-neutral-600"
+                              : "text-rose-800"
+                          }`}
+                        >
+                          {explanation.hint}
+                        </p>
+                      )}
+                    </>
+                  )}
+
                   <button
                     onClick={handleNextAfterReveal}
-                    className={`mt-2 px-4 py-1.5 rounded-lg text-white text-sm transition-colors ${
+                    disabled={explanation === null}
+                    className={`mt-2 px-4 py-1.5 rounded-lg text-white text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       revealReason === "three-x"
                         ? "bg-amber-900 hover:bg-amber-800"
+                        : revealReason === "gave-up"
+                        ? "bg-neutral-800 hover:bg-neutral-700"
                         : "bg-rose-900 hover:bg-rose-800"
                     }`}
                   >
@@ -298,7 +372,7 @@ export default function VocabPracticePage() {
                 </div>
               )}
 
-              {/* Input + submit + X-feedback. */}
+              {/* Input + Antworten + don't-know. */}
               {stage !== "revealed" && (
                 <div className="space-y-3">
                   <div className="flex gap-2">
@@ -308,16 +382,31 @@ export default function VocabPracticePage() {
                       value={answer}
                       onChange={(e) => setAnswer(e.target.value)}
                       onKeyDown={onKeyDown}
-                      disabled={stage === "judging" || stage === "exiting"}
+                      disabled={inputDisabled}
                       placeholder="Übersetzung eingeben…"
-                      className="flex-1 px-4 py-2.5 rounded-lg border border-neutral-300 bg-white text-base text-neutral-900 focus:border-neutral-600 focus:outline-none disabled:opacity-50"
+                      className="flex-1 min-w-0 px-4 py-2.5 rounded-lg border border-neutral-300 bg-white text-base text-neutral-900 focus:border-neutral-600 focus:outline-none disabled:opacity-50"
                     />
                     <button
                       onClick={handleSubmit}
-                      disabled={stage === "judging" || stage === "exiting" || !answer.trim()}
-                      className="px-5 py-2.5 rounded-lg bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      disabled={inputDisabled || !answer.trim()}
+                      className="shrink-0 px-5 py-2.5 rounded-lg bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {stage === "judging" ? "…" : "Antworten"}
+                    </button>
+                    <button
+                      onClick={handleDontKnow}
+                      disabled={inputDisabled}
+                      aria-label="Ich weiß die Vokabel nicht"
+                      title="Ich weiß die Vokabel nicht"
+                      className="shrink-0 aspect-square rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                    >
+                      <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                        <path
+                          fillRule="evenodd"
+                          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
                     </button>
                   </div>
 
