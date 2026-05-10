@@ -4,6 +4,37 @@ Things to do later — out of scope for the current phase but tracked so they do
 
 ---
 
+## Vocab comparator: detect garbage descriptions before splitting into polysemy
+
+**Trigger:** vocab save flow — `compareVocabDescriptions` in `lib/vocab.ts`
+**Status:** known bug, low priority; surfaced during the `te haya impresionado` debugging session
+
+### Problem
+
+The comparator decides synonym vs polysemy by comparing the new description against existing rows' descriptions. It assumes both descriptions are well-formed — but the description-generator can occasionally hallucinate a description that's about the SURROUNDING CLAUSE rather than the target word itself.
+
+Concrete case observed: the row for `te haya impresionado` (context: *un partido que te haya impresionado*) had description `"match that has left an impact"` — that's the meaning of the surrounding noun phrase, not the verb segment. When the same word was tapped again later, the new (correct) description `"impressed (past participle, subjunctive)"` was different enough that the comparator declared polysemy and inserted a second row, instead of recognising the first description as garbage and merging.
+
+Result: two rows for the same word/sense, both with wrong descriptions, and the queue rotation surfaces both at different times.
+
+### Fix sketch
+
+Add a sanity check in the comparator (or in the description-generator output validation):
+
+- Either: a separate "is this description plausibly about THIS target word?" LLM call that runs before the polysemy decision and rejects garbage descriptions outright (regenerate or flag for review).
+- Or: extend the comparator's existing prompt to explicitly consider "one of these descriptions doesn't actually describe the target word" as an option, and prefer merge-with-overwrite over polysemy-split in that case.
+- Or: a deterministic gate — back-translate the description to the target language via a quick LLM call and check substring overlap with the target word. If the description doesn't reference any content word from the target, it's probably garbage.
+
+The first option is cleanest but adds an LLM call to every save. The third is cheapest but brittle. The second is a single-prompt change with no extra cost.
+
+### Why it's deferred
+
+The fixed description-prompt (post `te haya impresionado` debug — Worked Examples now show clitic preservation + a "describe the target word, not the surrounding clause" rule) should reduce garbage descriptions massively. Worth waiting to see if it still happens in practice before adding comparator complexity.
+
+If post-fix testing surfaces another garbage-description case, promote this to active.
+
+---
+
 ## Per-user target language spec
 
 **Trigger:** Phase 4-7 (target-language threading)

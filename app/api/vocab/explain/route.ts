@@ -46,15 +46,35 @@ export async function POST(req: NextRequest) {
   const nativeLang = user.nativeLanguage;
   const prompt = `You are a vocabulary tutor. The learner is studying ${targetName}; their native language is ${nativeLang}.
 
-The learner couldn't recall this word. Provide a clear answer plus a short memory aid.
+The learner couldn't recall this word. Give a clear, structurally-faithful answer plus a short memory aid.
+
+The TRANSLATION must be the natural ${nativeLang} equivalent that mirrors the STRUCTURE of the target word — preserve every semantic component the target carries:
+- Single noun → article (with correct gender) + noun.
+- Single conjugated verb → infinitive form, OR include the subject pronoun if the conjugation is distinctive (1st/2nd person).
+- Multi-word verbal phrase (compound tense, modal periphrasis, clitic + verb) → full ${nativeLang} equivalent that preserves tense, aspect, and any clitic objects. Do NOT collapse to a single word.
+- Idiom / fixed expression → idiomatic ${nativeLang} equivalent (or close paraphrase if no exact idiom exists).
+- Adjective / adverb / function word → plain natural form.
+
+Worked examples (target Spanish, native German — illustrative, the same logic applies to any pair):
+- "casa"                → translation: "das Haus", hint: "Ein Gebäude, in dem man wohnt."
+- "comer"               → translation: "essen", hint: "Mahlzeiten zu sich nehmen."
+- "comió"               → translation: "(er/sie) aß / hat gegessen", hint: "Vergangenheit von essen."
+- "banco" (financial)   → translation: "die Bank (Geldinstitut)", hint: "Wo man Geld einzahlt oder abhebt."
+- "banco" (bench)       → translation: "die Sitzbank", hint: "Eine lange Bank, auf der man im Park sitzt."
+- "te haya impresionado" → translation: "(es) hat dich beeindruckt (Konjunktiv Perfekt)", hint: "Form nach „que" oder „ojalá", drückt Unsicherheit aus."
+- "darse cuenta"        → translation: "merken / bemerken (reflexiv)", hint: "Etwas plötzlich verstehen oder feststellen."
+- "echar de menos"      → translation: "vermissen", hint: "Jemanden oder etwas Abwesendes vermissen."
+- "voy a hacer"         → translation: "ich werde machen / ich gehe machen (nahe Zukunft)", hint: "Ankündigung einer baldigen Handlung."
 
 Word: "${row.target_word_original}"
 Sense being tested (in English): "${row.english_description}"
 
+If the Word and the Sense seem to disagree (e.g. the Sense omits a clitic that the Word clearly carries), trust the Word — describe what the Word actually says.
+
 Return ONLY valid JSON:
 {
-  "translation": "<natural ${nativeLang} translation for the tested sense, vocab-card style — include article/gender for nouns, infinitive form for verbs, no quotes, no explanation>",
-  "hint": "<short ${nativeLang} example sentence or memory aid that disambiguates THIS sense from other senses of the word, max 15 words, ends with a period>"
+  "translation": "<full ${nativeLang} translation that mirrors the target's structure>",
+  "hint": "<short ${nativeLang} example or memory aid that disambiguates THIS sense from other senses of the word, max 15 words, ends with a period>"
 }`;
 
   try {

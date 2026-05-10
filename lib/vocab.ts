@@ -94,10 +94,12 @@ export async function generateVocabDescription(args: DescribeWordArgs): Promise<
 Write a SHORT English description (3-7 words) of the SPECIFIC SENSE the tapped word has in this sentence. The description is used as a sense-key: it must be precise enough that two genuinely different meanings of the same word produce noticeably different descriptions, but generic enough that two synonymous translations of the same meaning produce IDENTICAL descriptions.
 
 Rules:
-- 3 to 7 words. No leading article. No trailing period.
-- Describe the meaning, not the form (do not write tense / number).
+- 3 to 9 words. No leading article. No trailing period.
+- Describe the meaning, not the morphological form (no bare "tense / number" labels for single-word lexemes).
 - Be neutral about register / dialect.
 - The context may wrap the tapped word in «guillemets» — that marks exactly which occurrence the learner tapped (the same word may appear multiple times in different senses). Use that marker to disambiguate.
+- Describe the TARGET WORD itself, not the surrounding clause. If the context mentions a topic (a match, a meal, a person), do NOT paraphrase that topic into the description. The description must be about the segment.
+- For MULTI-WORD target words (compound tenses, idioms, fixed expressions, segments with clitic pronouns), the description must include EVERY semantic component the segment carries. Clitic objects (te, me, lo, la, le, nos, os, los, las, les, se), reflexive markers, particles, and tense/aspect cues are all part of the meaning — never drop them. The description should be reproducible: if you back-translated it into the target language, you should land on the same segment, not a shorter form.
 
 Worked examples:
   "banco" in "el «banco» está cerrado los domingos"          → "financial institution"
@@ -110,9 +112,12 @@ Worked examples:
   "comer" in "vamos a «comer» pasta"                         → "to eat (food, meal)"
   "Madrid" in "vivo en «Madrid» desde hace cinco años"       → "Madrid (city, capital of Spain)"
   "Coca-Cola" in "una «Coca-Cola» fría"                      → "Coca-Cola (the soft drink brand)"
-  Multi-word segment example:
-  "te haya impresionado" in "un partido que te «haya» impresionado" → "has impressed (subjunctive perfect)"
-  (Here the tapped word is just "haya" but the segment to describe is the whole compound tense.)
+  Multi-word segment examples (note: every clitic / particle is preserved):
+  "te haya impresionado" in "un partido que te «haya» impresionado" → "has impressed you (subjunctive perfect)"
+  "darse cuenta" in "no se «dio» cuenta del error"           → "to realise / become aware (reflexive)"
+  "echar de menos" in "te «echo» de menos"                   → "to miss (someone or something absent)"
+  "se lo dijo" in "ya «se» lo dijo a su madre"               → "told it to him/her (already)"
+  "voy a hacer" in "«voy» a hacer la cena"                   → "going to do / make (near future)"
 
 Word: "${args.target_word}"
 Context: "${context}"
