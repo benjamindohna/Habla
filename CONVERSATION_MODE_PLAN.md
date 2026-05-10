@@ -1,5 +1,14 @@
 # Conversation Mode — Implementation Plan
 
+> **Historical document — as of 2026-05-10, most of this plan is implemented
+> and the branch has grown well beyond it.** Read `README.md` for the
+> current state of the app. This file is preserved so future contributors
+> can understand the original design intent behind the
+> `segments3-conversation` branch (per-user accounts, topic grid, chat-
+> style conversation mode reusing the correction stack). Specific
+> phasing decisions and prompt iterations below may no longer match
+> current code.
+
 Branch: `segments3-conversation`
 
 This document describes the full set of changes to add: per-user accounts in a real database, a topic-selection home screen with LLM-generated interest tiles, and a chat-style conversation mode that re-uses the existing correction primitives. The build is split into phases so each can land and be tested independently.
