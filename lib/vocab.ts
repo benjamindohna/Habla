@@ -214,14 +214,14 @@ Decide whether the learner's answer is an acceptable ${args.native_language} tra
 
 Be LENIENT on:
 - missing or extra articles ("Hund" ≈ "der Hund")
-- synonymous wording ("Bank" ≈ "Geldinstitut")
+- synonymous wording that shares the SAME CORE LITERAL MEANING ("Bank" ≈ "Geldinstitut"; "essen" ≈ "verspeisen")
 - minor typos ("Sitzbqnk" → accept as "Sitzbank")
 - capitalisation
 - minor inflection differences (singular ≈ plural if the sense is the same)
 - AMBIGUOUS answers that could plausibly mean the tested sense — accept (return 1), even if they could also mean something else.
 
 Be STRICT on:
-- actual meaning mismatch
+- actual meaning mismatch — including answers that are only metaphorically, thematically, or distantly related to the tested sense. Accept synonyms only when they share the SAME CORE CONCEPT, not when the link is "both relate to removing something bad" or "both involve change of state". Example: for "limpieza" (cleaning), "Heilung" (healing) → 0, because cleaning and healing are different core concepts even though one might metaphorically be called "spiritual cleansing".
 - empty answers
 - the learner just echoing the target word back instead of translating
 - answers in the wrong language
@@ -257,6 +257,13 @@ Tested word: "fuego" — sense: "literal fire / flame"
   "Feuer"              → 1
   "Leidenschaft"       → X   (unambiguously the passion / inner-fire sense, valid alt meaning)
   "Schrank"            → 0   (unrelated)
+
+Tested word: "limpieza" — sense: "act of cleaning, removing dirt"
+  "Reinigung"          → 1   (direct synonym, same core)
+  "Putzen"             → 1   (verb form of cleaning, same core)
+  "Sauberkeit"         → 1   (related noun, very close core — state of being clean)
+  "Heilung"            → 0   (different concept — healing, not cleaning; only metaphorically related)
+  "Schmutz"            → 0   (opposite concept)
 
 Tested word: "haya impresionado" — sense: "has impressed (subjunctive perfect)"
   "hat beeindruckt"    → 1
