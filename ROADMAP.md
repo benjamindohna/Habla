@@ -550,6 +550,143 @@ Each phase is a substantial build (multi-week). This is months-of-work territory
 
 ---
 
+## 5. Rigid Mode — forced reproduction drill
+
+Opt-in stricter conversation mode. After the user finishes a turn and sees the corrected version (`local_version_target`), instead of clicking Done they must **reproduce that corrected sentence aloud from memory, chunk by chunk**. Whisper transcribes their attempt, an LLM judge compares word-for-word against the target. Pass → next chunk. Fail → retry. All chunks passed → Done fires, AI replies.
+
+Pedagogically the point is to flip passive recognition ("ah yeah that's what I meant") into active production. Reading a correction is cheap; reproducing it from memory is the step that actually rewires recall.
+
+### Chunking strategy — deterministic, no LLM
+
+Server-side, computed once when `local_version_target` is finalised, attached to the correction response as `chunks: string[]`.
+
+Algorithm:
+1. Split the corrected text by sentence-ending punctuation `[.!?]` (closing only — not Spanish-opening `¿ ¡`, those would break questions in half).
+2. Greedy-pack consecutive sentences into chunks targeting ~15-25 words each.
+3. If a single sentence exceeds 30 words, split at the comma closest to its midpoint.
+
+Pure string logic. No LLM call, no determinism risk, debuggable. Edge cases: single short user turn (1 sentence, <10 words) → 1 chunk = the whole sentence. Long monologue → 3-5 chunks.
+
+### Whisper bias — the key reliability lever
+
+Whisper has well-known Spanish homophone failure modes: `haya`/`halla`, `hay`/`ay`, accent-drops (`sabia` vs `sabía`). If the user pronounces correctly but Whisper transcribes the wrong homophone, a strict judge fails them unfairly.
+
+**Fix:** pass the target chunk as Whisper's `prompt` parameter when transcribing in Rigid mode:
+
+```
+prompt: `The speaker is repeating this ${target} sentence verbatim: "${chunk}". Transcribe accurately.`
+```
+
+Whisper biases its decoding toward the prompt's vocabulary. Empirically this collapses the homophone false-fail rate. Without this, Rigid mode would feel arbitrary and broken — *with* it, fails are real fails.
+
+### Judge prompt
+
+```
+You are a strict speech-recognition comparison engine for a language drill.
+
+You receive:
+- TARGET:     the exact sentence the learner is trying to reproduce.
+- TRANSCRIPT: what their speech was transcribed as (via Whisper).
+
+Decide whether TRANSCRIPT matches TARGET word-for-word.
+
+Be LENIENT only on:
+- Casing.
+- Punctuation (commas, periods, ¿ ¡, quotation marks).
+- Leading/trailing whitespace.
+- Single-syllable filler words at start, end, or between words: "eh", "uh", "ehm", "mmm", "ah".
+- Diacritic-only differences ("sabia" vs "sabía", "si" vs "sí") — Whisper drops accents inconsistently.
+
+Be STRICT on:
+- Different content words (even one).
+- Missing or added words (other than the listed fillers).
+- Wrong inflection ("habla" vs "hablo" → fail).
+- Wrong tense or aspect.
+- Wrong article or gender ("el" vs "la").
+
+Output exactly ONE character:
+- 1  match (modulo lenient rules)
+- 0  any content difference
+
+TARGET:     "${target}"
+TRANSCRIPT: "${transcript}"
+```
+
+`chat_light` (gpt-4o-mini), temperature 0. ~$0.0001 per call. Diacritic-lenience is non-negotiable — without it Whisper-noise dominates legitimate fails.
+
+### State machine per chunk
+
+Three states: `revealed` (chunk shown, user reads) → `hidden` (chunk covered, recorder active) → `judged` (1 or 0 returned).
+
+Transitions:
+- `revealed` → `hidden` when user clicks "Hide & speak".
+- `hidden` → `judged` when Whisper + judge resolve.
+- `judged` 1 → next chunk's `revealed`, or done if last chunk.
+- `judged` 0 → back to `revealed` for retry.
+
+After 3 fails on the same chunk, surface a "Skip" button so the user is never stuck. Skip counts as a non-pass for analytics but lets the flow continue.
+
+### UX flow
+
+1. User finishes a turn → correction view as today.
+2. Rigid mode: instead of Done, the bubble shows "Repeat & speak".
+3. Click → correction view collapses into a Reveal Strip showing the current chunk + "Hide & speak" button.
+4. "Hide & speak" → strip replaced by recorder. User records. Whisper + judge fire.
+5. Pass: green checkmark, auto-advance to next chunk's reveal. Last chunk passed → implicit Done, AI replies.
+6. Fail: chunk re-revealed with a "Try again" button. Optional v1.5: brief diff hint ("3rd word differs"). v1 just re-reveal, no diff — keeps it simple.
+
+### Reliability / bug surface
+
+| Risk | Mitigation |
+|---|---|
+| Double-record while STT in flight | Recorder disabled while `isProcessing=true` (already the pattern in ConversationView) |
+| Race: next-chunk click before judge resolves | Ignore until current chunk's promise settles |
+| Page reload mid-rigid-session | Accept loss of progress for v1; chunks recompute from `local_version_target`, user just restarts. Persisting half-state is overkill. |
+| Re-correct mid-rigid (user edits interpretation) | Reset Rigid state entirely, recompute chunks from new `local_version_target` |
+| Whisper truly mishears + bias prompt didn't catch | "Skip" button after 3 fails — user is never locked out |
+| Long monologue → 5 chunks → tedious | The 15-25 word chunk-size cap is the lever; tune up or down if user feedback says it's too granular or too memory-heavy |
+
+### Storage
+
+```sql
+ALTER TABLE users ADD COLUMN rigid_mode INTEGER NOT NULL DEFAULT 0;
+```
+
+Per-user toggle, persists in DB. UI: setting in conversation header (next to Auto-Read), localStorage-mirrored for instant feedback. Per-conversation override is YAGNI for v1.
+
+Optional analytics columns (skip for v1, add when needed):
+
+```sql
+ALTER TABLE messages ADD COLUMN rigid_attempts INTEGER;  -- total attempts across all chunks
+ALTER TABLE messages ADD COLUMN rigid_skipped INTEGER;   -- count of chunks skipped
+```
+
+### Cost
+
+Per chunk: 1 Whisper (~$0.001) + 1 judge (~$0.0001) = ~$0.0011.
+Per session at 5-10 chunks across the conversation: +$0.005-$0.011.
+Negligible against the existing ~$0.05/session.
+
+### Out of scope for v1
+
+- Pronunciation scoring (separate feature, needs a different model).
+- Pre-drill TTS playback of the target before the recall step.
+- Speed variants (slow/fast drill).
+- Partial-credit / "close enough" — Rigid means rigid. The whole point is the strictness.
+- Mid-chunk diff hint on fail. Possible v1.5; v1 just re-reveals.
+
+### Build phasing
+
+Single-PR build, ~1 day:
+1. Backend: chunking helper + `/api/rigid/judge` endpoint + Whisper-bias-prompt support.
+2. Schema: `rigid_mode` column + migration.
+3. UI: Rigid toggle in ConversationView header. Reveal Strip component. State-machine wiring on `UserBubble`.
+4. End-to-end test on local dev with multiple sentence lengths.
+
+Depends on: Phase A/B target-language renames merged first (so the backend uses `local_version_target` consistently). No dependency on C/D/E.
+
+---
+
 ## Implementation notes
 
 - Dashboard is a thin shell over existing routes — minimal new infra.
