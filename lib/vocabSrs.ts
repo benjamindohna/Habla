@@ -50,10 +50,14 @@ export function getDueVocabQueue(userId: number, limit: number = 30): DueVocabRo
 /**
  * Apply the SRS state change for a row given the judge verdict.
  *
- * "1": stage = MIN(MAX_STAGE, stage + 1); last_seen = now.
- * "0": stage = MAX(0, FLOOR(stage / 2)); last_seen = now.
+ * "1": stage = MIN(MAX_STAGE, stage + 1); last_seen = now; looked_up += 1.
+ * "0": stage = MAX(0, FLOOR(stage / 2));   last_seen = now; looked_up += 1.
  * "X": no-op — caller should not invoke this with X verdicts. The card
  *      remains in the queue at the same stage and last_seen.
+ *
+ * looked_up bumps on every committed test-mode review (same intent as
+ * the chat-re-tap path: the counter faithfully reflects how often the
+ * user has encountered this word, regardless of outcome).
  */
 export function applyJudgeResult(rowId: number, userId: number, judge: VocabJudgement): void {
   if (judge === "X") return;
@@ -63,14 +67,14 @@ export function applyJudgeResult(rowId: number, userId: number, judge: VocabJudg
   if (judge === "1") {
     db.prepare(
       `UPDATE user_vocab
-       SET stage = MIN(?, stage + 1), last_seen = ?
+       SET stage = MIN(?, stage + 1), last_seen = ?, looked_up = looked_up + 1
        WHERE id = ? AND user_id = ?`,
     ).run(MAX_STAGE, now, rowId, userId);
   } else {
     // "0" — wrong answer. Halve the stage (floor).
     db.prepare(
       `UPDATE user_vocab
-       SET stage = MAX(0, stage / 2), last_seen = ?
+       SET stage = MAX(0, stage / 2), last_seen = ?, looked_up = looked_up + 1
        WHERE id = ? AND user_id = ?`,
     ).run(now, rowId, userId);
   }
