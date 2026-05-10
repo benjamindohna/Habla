@@ -196,6 +196,58 @@ Sometimes the bare translation isn't enough. The user wants to dig deeper withou
 
 ---
 
+## 6. Onboarding placement test + tiered seed-vocab import
+
+**What it is**
+
+When a new user signs up, run a short calibration test (~5-10 cards spanning frequency ranks 50 / 200 / 500 / 1000 / 2000) to estimate their level. Score determines what slice of a pre-computed seed-vocab list gets imported into their `user_vocab`:
+
+- **Beginner (level ~0-30)**: import ranks 1-500 — they need the function-word foundation.
+- **Intermediate (level ~30-60)**: import ranks ~400-1000 — skip the trivial (`el`, `de`, `que`) which they already know, give them mid-frequency words that are common in real conversation but rare in the chat opener pool.
+- **Advanced (level 60+)**: no import — their gaps are idiosyncratic, only organic tap-collection finds them.
+
+Optional pivot for users who already exist or want to recalibrate: surface the same test under `/vocab/calibrate` later.
+
+**Why it's interesting**
+
+The blanket "import top-500 for everyone" would flood an advanced user's queue with garbage they already know. SRS works *because* intervals match retrieval strength — forcing `el` onto a B2 user's daily review breaks that. Tiered seeding respects the user's existing knowledge while still solving the cold-start problem for true beginners.
+
+The onboarding test reuses infrastructure we already have: `judgeVocabAnswer` for grading, the same card UI as the main `/vocab` mode. So the marginal build cost is the placement-logic mapping (test result → level → seed range) and the test framing UI.
+
+**Implementation sketch**
+
+- `seed_vocab` shared table keyed by `(language, target_word_lower)` with pre-generated `english_description`, `context_sentence`, `relevance_rank`. Generated once per language via an admin script (~$0.05 of LLM calls per language for 1000 entries).
+- Onboarding flow:
+  1. After signup, present a short modal: "Lass uns dein Niveau einschätzen — 5-10 schnelle Wörter".
+  2. For each rank-level (50, 200, 500, 1000, 2000), show 1-2 cards drawn from `seed_vocab WHERE relevance_rank ≈ X`. User answers; judge grades.
+  3. Score → level bucket → seed range.
+  4. `INSERT INTO user_vocab SELECT ... FROM seed_vocab WHERE language = ? AND relevance_rank BETWEEN ? AND ?`.
+- Skip / "ich kenne keins" → assume beginner, full import.
+- Skip the test entirely → no import, organic-only path (current v1 default).
+
+**Cost**
+
+- Seed generation per language: ~$0.05 once, ~30 min admin time.
+- Per-user onboarding: 5-10 judge calls = ~$0.0005 per signup.
+- Per-user import: 0 LLM calls (bulk SQL INSERT).
+
+**Open questions**
+
+- Frequency list source for Spanish seed: Hermit Dave's `FrequencyWords` (OpenSubtitles-derived, free CSV, conversational bias) is the easiest practical option. Top ~700 → manual / LLM cleanup of inflected duplicates and typos → 500 clean lemmas. CEFR A1/A2 lists from Instituto Cervantes are an alternative pedagogical anchor.
+- Castellano vs general Spanish: top 500 are identical, regional divergence starts ~rank 800-1500. General Spanish list is fine for Castellano users at this scale.
+- Per-language `seed_vocab` requires Phase D of the target-language migration to be done (per-user TargetSpec). Until then, hardcode Spanish.
+- What happens to the seeded vocab if a user later switches target language (Phase D edge case)? Add a `language` column to `user_vocab` so seeded rows can be filtered. Schema-cheap, future-proof.
+- Daily-new-cards cap (Anki defaults to 20)? Probably no — user already controls pace via their chat frequency. Add later if feedback says queue feels overwhelming.
+- Mid-stage recalibration: a B2 user who imported as A1 ends up wrongly stuck reviewing `el`. Soft-fix: a "mark this as known" button on the card lets them eject any seeded card from their queue.
+
+**Decision for v1**
+
+Not built. v1 is **organic-only** — user accumulates vocab by tapping in chat. Empty-state on `/vocab` after all due cards are answered: "Alles gelernt — starte einen neuen Chat, um neue Wörter zu entdecken." This avoids the placement-test build cost and the seed-list curation work, and respects existing users who don't need basic-word drilling.
+
+The placement-test approach is the path forward whenever (a) we onboard true beginners at scale, or (b) we add a second target language and want to give learners-of-Hungarian a similar runway.
+
+---
+
 ## Bigger ideas captured elsewhere
 
 Some ideas grew big enough to deserve their own dedicated section in `ROADMAP.md` rather than living here as a sketch:
