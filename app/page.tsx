@@ -162,7 +162,13 @@ export default function Page() {
             onClick={() => router.push("/vocab/practice")}
             className="text-xs text-neutral-500 hover:text-neutral-800 transition-colors"
           >
-            Vokabeln üben →
+            Übersetzen →
+          </button>
+          <button
+            onClick={() => router.push("/vocab/sentence")}
+            className="text-xs text-neutral-500 hover:text-neutral-800 transition-colors"
+          >
+            Anwenden →
           </button>
           <button
             onClick={handleLogout}
