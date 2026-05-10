@@ -9,6 +9,7 @@ interface Row {
   english_description: string;
   context_sentence: string | null;
   stage: number;
+  stage_sentence: number;
   next_due_at: number | null;
   correct_streak: number;
   looked_up: number;

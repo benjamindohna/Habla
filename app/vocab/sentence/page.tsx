@@ -51,7 +51,7 @@ export default function VocabSentencePage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/vocab/queue")
+    fetch("/api/vocab/queue?mode=sentence")
       .then(async (res) => {
         if (res.status === 401) {
           router.push("/login");
@@ -144,7 +144,7 @@ export default function VocabSentencePage() {
         await fetch("/api/vocab/commit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rowId: currentCard.id, result: "1" }),
+          body: JSON.stringify({ rowId: currentCard.id, result: "1", mode: "sentence" }),
         }).catch(() => {});
         dismissCurrentAfterCommit();
       } else if (data.result === "X") {
@@ -186,7 +186,7 @@ export default function VocabSentencePage() {
     await fetch("/api/vocab/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rowId: currentCard.id, result: "0" }),
+      body: JSON.stringify({ rowId: currentCard.id, result: "0", mode: "sentence" }),
     }).catch(() => {});
     dismissCurrentAfterCommit();
   }

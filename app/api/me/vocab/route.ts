@@ -66,7 +66,7 @@ export async function GET() {
   const rows = getDb()
     .prepare(
       `SELECT id, target_word_original, target_word_lower, english_description,
-              context_sentence, stage, next_due_at, correct_streak,
+              context_sentence, stage, stage_sentence, next_due_at, correct_streak,
               looked_up, last_seen, created_at, relevance_rank
        FROM user_vocab
        WHERE user_id = ?

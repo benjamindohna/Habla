@@ -186,8 +186,11 @@ function generateAssetsAsync(
 
 /**
  * Soft-lapse a row when the user re-looks-up the same sense — they
- * needed the translation again, so retention is imperfect. Halves the
- * SRS stage (Math.floor) — same penalty as a test-mode "0" verdict.
+ * needed the translation again, so retention is imperfect. Halves
+ * BOTH SRS stages (recognition + sentence) — same penalty as a test
+ * "0" verdict in either mode. The re-tap signals general weakness on
+ * the word, not a mode-specific failure, so both modes pay.
+ *
  * Cooldown of 5 minutes on the stage halving prevents over-punishing
  * rapid re-checks of the same conversation bubble.
  *
@@ -204,9 +207,10 @@ function softLapseIfDue(userId: number, rowId: number): void {
   // after the previous one. looked_up + last_seen are unconditional.
   db.prepare(
     `UPDATE user_vocab
-     SET stage = CASE WHEN last_seen < ? THEN MAX(0, stage / 2) ELSE stage END,
-         looked_up = looked_up + 1,
-         last_seen = ?
+     SET stage          = CASE WHEN last_seen < ? THEN MAX(0, stage / 2)          ELSE stage          END,
+         stage_sentence = CASE WHEN last_seen < ? THEN MAX(0, stage_sentence / 2) ELSE stage_sentence END,
+         looked_up      = looked_up + 1,
+         last_seen      = ?
      WHERE id = ? AND user_id = ?`,
-  ).run(cutoff, now, rowId, userId);
+  ).run(cutoff, cutoff, now, rowId, userId);
 }
