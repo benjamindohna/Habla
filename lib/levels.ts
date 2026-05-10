@@ -246,6 +246,17 @@ export function getLevelRange(level: number): LevelRange {
 }
 
 /**
+ * Compact one-line-per-range view of the full 1-100 scale. Used by the
+ * adaptive level-tracker prompt so the LLM can place a learner's
+ * production samples on the scale.
+ */
+export function describeLevelScaleCompact(): string {
+  return LEVEL_RANGES.map(
+    (r) => `${r.min.toString().padStart(2, " ")}-${r.max} (${r.cefr}): ${r.short} — ${r.description.split(".")[0]}.`,
+  ).join("\n");
+}
+
+/**
  * Renders the learner's level as a compact, prompt-ready block —
  * level number + CEFR anchor + abilities + concrete examples + a
  * "aim slightly above this" instruction. Used in chat prompts where

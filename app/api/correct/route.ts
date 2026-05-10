@@ -6,6 +6,7 @@ import {
   segment,
   type CorrectionStyle,
 } from "@/lib/correctionPipeline";
+import { pushRecentInput, runLevelCheckIfDue } from "@/lib/levelTracker";
 import type { CorrectionResult } from "@/types/correction";
 
 /**
@@ -41,6 +42,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "transcript required" }, { status: 400 });
   }
   const nativeLanguage = body.nativeLanguage?.trim() || "German";
+
+  // Adaptive level tracker: push the raw transcript into the user's
+  // FIFO ring of last 5 inputs, then fire-and-forget the cadence check
+  // (no-op unless 5 inputs are present and >24h since last check).
+  pushRecentInput(session.userId, transcript);
+  void runLevelCheckIfDue(session.userId);
   const style: CorrectionStyle = body.style === "transcript_aware" ? "transcript_aware" : "natural";
   const override = body.overrideIntendedMeaning?.trim();
 

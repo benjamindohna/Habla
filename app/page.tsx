@@ -26,6 +26,8 @@ export default function Page() {
   // True while we're starting a new conversation (post tile-tap, awaiting
   // /api/converse/start, before navigation to /chat/[id]).
   const [starting, setStarting] = useState<string | null>(null);
+  // Toggle for the level-info modal (the small "?" badge next to the level).
+  const [showLevelInfo, setShowLevelInfo] = useState(false);
 
   // Topics for the home grid. null = loading; [] = error fetching first set.
   const [topics, setTopics] = useState<TopicWithKind[] | null>(null);
@@ -158,6 +160,16 @@ export default function Page() {
           </select>
         </label>
         <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-neutral-500 tabular-nums">Level {me.level}</span>
+            <button
+              onClick={() => setShowLevelInfo(true)}
+              aria-label="Wie funktioniert das Level?"
+              className="w-4 h-4 rounded-full border border-neutral-300 text-neutral-400 text-[10px] leading-none flex items-center justify-center hover:border-neutral-500 hover:text-neutral-600 transition-colors"
+            >
+              ?
+            </button>
+          </div>
           <button
             onClick={() => router.push("/vocab/practice")}
             className="text-xs text-neutral-500 hover:text-neutral-800 transition-colors"
@@ -178,6 +190,35 @@ export default function Page() {
           </button>
         </div>
       </div>
+
+      {showLevelInfo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4"
+          onClick={() => setShowLevelInfo(false)}
+        >
+          <div
+            className="max-w-md w-full bg-white rounded-2xl shadow-xl p-6 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm font-medium text-neutral-800">
+              Wie funktioniert das Level?
+            </p>
+            <p className="text-sm text-neutral-600 leading-relaxed">
+              Alle 24 Stunden sieht sich ein vertraulicher Algorithmus deine letzten Chat-Aufnahmen
+              an und entscheidet, ob du Fortschritte machst oder ob dein Level lieber einen
+              Schritt heruntergesetzt werden soll.
+            </p>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowLevelInfo(false)}
+                className="text-xs text-neutral-500 hover:text-neutral-800 transition-colors"
+              >
+                Schließen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="w-full max-w-xl flex flex-col items-center gap-8 flex-1">
         <h1 className="text-2xl font-semibold tracking-tight text-center">
