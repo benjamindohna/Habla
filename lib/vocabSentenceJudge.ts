@@ -54,65 +54,82 @@ export async function judgeVocabSentence(args: SentenceJudgeArgs): Promise<Vocab
 
 The learner was shown the word "${args.target_word}" (sense: "${args.tested_description}") and asked to produce a sentence that uses this word and demonstrates they understand its meaning.
 
-Decide whether the learner has DEMONSTRATED UNDERSTANDING.
+You are testing ONE thing: does the learner know what THIS sense of the word means? Not grammar. Not fluency. Not whether the rest of the sentence is in the right language.
 
-Two requirements, BOTH must hold for "1":
+═════ DO NOT FAIL THE LEARNER FOR ANY OF THESE ═════
 
-REQUIREMENT 1 — Word present verbatim
-- "${args.target_word}" must appear in the sentence in the EXACT same form (case-insensitive only — diacritics required).
-- Lemmatised or inflected variants do NOT satisfy. If the card is "comió", the user must use "comió"; "come" / "comer" / "comieron" → 0.
-- If a word with the same spelling appears but in a clearly different sense than tested → X.
+These are EXPECTED at the learner's level and are NEVER fail signals:
+- Grammar errors anywhere except on the target word itself: missing articles, wrong gender, wrong subject-verb agreement, wrong conjugation of OTHER words, missing prepositions, wrong word order.
+- ${args.native_language} words mixed in. The learner falls back to their native language for words they don't yet know in ${args.target_language}. This is the norm at every level below near-native. A sentence can be 80% ${args.native_language} and still be valid if the target word is correctly used in context.
+- Awkward phrasing, run-on sentences, missing punctuation, weird capitalisation.
+- Very short sentences (one clause), as long as the clause anchors the meaning.
 
-REQUIREMENT 2 — Sentence demonstrates understanding
-- The surrounding context must REQUIRE the word's tested sense.
-- A sentence so generic that any other word would slot into the same position equally well does NOT demonstrate understanding → 0.
-- Heuristic: mentally replace the target word with a placeholder ("X"). If the sentence still parses meaningfully ("Er hat sich X"), the original was generic. If replacement makes the sentence nonsensical or much vaguer, the original demonstrates understanding.
+Focus only on the target word. Everything else can be ugly.
 
-Be LENIENT on:
-- Grammar errors anywhere EXCEPT on the target word itself (subject-verb agreement, articles, gender, conjugation of OTHER words, word order, prepositions).
-- ${args.native_language} words mixed in for vocabulary the learner doesn't know.
-- Awkward phrasing, missing punctuation, missing capitalisation.
-- Sentences that are short — one clause is fine, as long as it gives semantic anchor.
+═════ DECISION TREE ═════
 
-Be STRICT on:
-- Word missing or in a different form → 0.
-- Empty / single-word answer → 0.
-- Sentence that just plops the word into a slot without demanding its meaning → 0.
+Step 1 — Does "${args.target_word}" appear in the sentence in EXACTLY the same form (case-insensitive, diacritics required)?
+  - No, or in a different inflected/lemmatised form → return 0.
+  - Yes → go to Step 2.
 
-Output exactly ONE character:
-- 1  word verbatim, used in the tested sense, sentence demonstrates understanding
-- X  word verbatim, but the sentence uses it in a DIFFERENT (sister) sense than tested
-- 0  word missing / wrong form / different word, OR sentence is generic / empty / placeholder
+Step 2 — Look at the sentence around the word. Which sense of the word does it require?
+  - The TESTED sense → go to Step 3.
+  - A DIFFERENT, well-known sense of the same word (polysemy) → return X. The learner clearly knows the word in SOME sense, just not the tested one; they deserve a retry, not a fail.
+  - Sense is unclear / generic / would fit any word in that slot → return 0.
 
-Examples (illustrative — Spanish target, German native; rules apply to any language pair):
+Step 3 — Does the sentence give specific semantic context that requires the tested sense?
+  Mental test: replace the target word with a placeholder. If the sentence still parses meaningfully ("Er hat sich X"), the original was generic → 0.
+  If replacing makes it nonsensical or much vaguer, the original demonstrated understanding → 1.
+
+═════ VERDICTS ═════
+- 1  word verbatim, anchors the TESTED sense
+- X  word verbatim, anchors a DIFFERENT well-known sense of the same word
+- 0  word missing / wrong form, OR sentence is generic / empty / placeholder
+
+X is for polysemy mismatch only. It rewards "you know the word, just the wrong meaning." Use it whenever the learner's sentence makes coherent sense — just for a different sense of the same word.
+
+═════ WORKED EXAMPLES (illustrative — Spanish target, German native; rules apply to any language pair) ═════
 
 Tested word: "comió" — sense: "ate (3rd person, simple past)"
   "Mi hermana comió pizza ayer."          → 1   (specific food + past time anchor)
-  "El perro se comió las galletas."       → 1   (food + agent — meaning clear; reflexive "se" OK)
+  "El perro se comió las galletas."       → 1   (food + agent — bench sense clear; reflexive "se" OK)
+  "Mein Hund hat eine pizza comió."       → 1   (mostly German + grammar errors + native word "pizza", but "comió" is verbatim AND the eating-food context is clear)
+  "Ayer ich comió zwei Brötchen."         → 1   (German subject + German object, but "comió" verbatim + clear eating context)
   "Él comió."                              → 0   (no anchor — could be any past-tense verb)
-  "Mi hermana come pizza ayer."            → 0   (form wrong: "come" not "comió")
   "Comió mucho."                           → 0   (no specific food/context — too generic)
-  ""                                        → 0   (empty)
+  "Mi hermana come pizza ayer."            → 0   (form wrong: "come" not "comió")
   "Yo comer pizza."                        → 0   (form wrong: bare infinitive, not "comió")
+  ""                                        → 0   (empty)
 
 Tested word: "verbessern" — sense: "to improve / make better"
-  "Ich möchte mein Spanisch verbessern."   → 1   (specific object — Spanish — anchors the meaning)
+  "Ich möchte mein Spanisch verbessern."   → 1   (specific object — Spanish — anchors meaning)
   "Wir können das System verbessern."       → 1   (clear object of improvement)
+  "Ich will mi habilidades verbessern."     → 1   (Spanish/German mix + grammar errors, but "verbessern" verbatim + concrete object "habilidades" anchors improvement sense)
   "Er möchte sich verbessern."              → 0   (generic — could fit any reflexive verb of self-change)
   "Das Team will verbessern."               → 0   (no object, no specific anchor)
   "Verbessern ist gut."                     → 0   (statement about the verb itself, no application)
 
 Tested word: "banco" — sense: "long bench to sit on"
   "Me senté en el banco del parque."       → 1   (location + sitting verb — bench sense clear)
-  "Voy al banco a sacar dinero."           → X   (verbatim, but financial-bank sense, not bench)
+  "Ich saß auf el banco im Park."          → 1   (mostly German, but "banco" verbatim + sitting/park anchors bench-sense)
+  "Voy al banco a sacar dinero."           → X   (verbatim, but anchors FINANCIAL-bank sense, not bench)
+  "El cajero del banco fue muy amable."    → X   (cashier of the bank — clearly financial sense)
   "El banco es grande."                     → 0   (generic — could be either sense)
+
+Tested word: "banco" — sense: "financial institution / bank where you deposit money"
+  "Voy al banco a sacar dinero."           → 1   (financial sense clear)
+  "Pagué la hipoteca en el banco."         → 1   (mortgage payment — clear financial context)
+  "Me senté en el banco del parque."       → X   (verbatim, but anchors BENCH-sense, not financial)
+  "El perro estaba durmiendo en el banco." → X   (dog sleeping ON the bench — bench-sense, not financial)
+  "El banco está cerrado."                  → 0   (generic — both senses can be "closed")
 
 Tested word: "haya impresionado" — sense: "has impressed (subjunctive perfect)"
   "Quizás te haya impresionado el partido." → 1   (subjunctive trigger "quizás", meaningful object)
   "Espero que les haya impresionado."        → 1   (subjunctive trigger "espero que", object pronoun)
+  "Hoffe que the movie le haya impresionado." → 1  (German + English mix, but "haya impresionado" verbatim + clear "movie impressed him" context)
   "Haya impresionado."                       → 0   (no anchor)
 
-Now evaluate.
+═════ NOW EVALUATE ═════
 
 Tested word: "${args.target_word}"
 Sense being tested: "${args.tested_description}"
