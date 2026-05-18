@@ -94,13 +94,13 @@ export async function runLevelCheckIfDue(userId: number): Promise<void> {
   }
 
   const currentLevel = row.level;
-  const range = getLevelRange(currentLevel);
+  const range = getLevelRange(currentLevel, targetLanguage);
   const prompt = `You are evaluating a language learner's proficiency level.
 
 The learner is studying ${targetName}; their native language is ${row.native_language}.
 
 LEVEL SCALE (1-100):
-${describeLevelScaleCompact()}
+${describeLevelScaleCompact(targetLanguage)}
 
 Their CURRENT level: ${currentLevel}/100 — range ${range.min}-${range.max} (${range.cefr}, "${range.short}").
 

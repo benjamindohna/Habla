@@ -15,10 +15,18 @@
 // added vocabulary band, added register — so the prompt-injected
 // description carries real signal for the LLM to target.
 //
+// Per-language: each target language gets its own LEVEL_RANGES array,
+// keyed by language name. CEFR descriptors (B1, C2 etc.) are
+// language-agnostic by design; the per-language arrays differ in their
+// grammar-tense references (subjuntivo vs subjonctif), example
+// sentences, and any other language-specific touchpoints.
+//
 // Used only in chat prompts (generateAIOpener, /api/converse/start,
 // /api/converse/turn) to shape AI message complexity. Not used in
 // localize, segment, explain, or topic generation — those stay
 // level-agnostic for now.
+
+import type { TargetLanguageSpec } from "./targetLanguage";
 
 export interface LevelRange {
   /** Inclusive lower bound on the 1-100 scale. */
@@ -35,7 +43,7 @@ export interface LevelRange {
   examples: string[];
 }
 
-export const LEVEL_RANGES: LevelRange[] = [
+const LEVEL_RANGES_SPANISH: LevelRange[] = [
   {
     min: 1, max: 5,
     cefr: "Pre-A1", short: "absolute beginner",
@@ -234,15 +242,230 @@ export const LEVEL_RANGES: LevelRange[] = [
   },
 ];
 
+const LEVEL_RANGES_FRENCH: LevelRange[] = [
+  {
+    min: 1, max: 5,
+    cefr: "Pre-A1", short: "absolute beginner",
+    description:
+      "Knows fewer than 50 target-language words, mostly cognates and survival phrases. Cannot form real sentences; relies on isolated words, gestures, and rote-memorised formulas. Comprehension is limited to slow, clear speech using only the most common words.",
+    examples: ["Bonjour.", "Merci.", "Je m'appelle Ben."],
+  },
+  {
+    min: 6, max: 10,
+    cefr: "A1 early", short: "very basic A1",
+    description:
+      "About 100-300 words. Forms simple 3-5 word sentences in the présent only, mostly SVO. Can introduce themselves, name common objects, ask for basic items. No past or future tenses yet. Pronoun use is shaky.",
+    examples: [
+      "Je suis étudiant.",
+      "Je parle un peu de français.",
+      "J'ai deux sœurs.",
+    ],
+  },
+  {
+    min: 11, max: 15,
+    cefr: "A1 late", short: "consolidated A1",
+    description:
+      "About 500 words. Talks about family, daily routine, basic preferences. Uses passé composé of common verbs (j'ai vu, je suis allé, j'ai mangé) tentatively, often mixing tenses. Self-corrects often. Articles and gender still inconsistent.",
+    examples: [
+      "Hier, je suis allé au supermarché.",
+      "Ma famille vient d'Allemagne, mais maintenant j'habite ici.",
+    ],
+  },
+  {
+    min: 16, max: 20,
+    cefr: "A2 early", short: "early A2",
+    description:
+      "About 800-1000 words. Comfortable with présent and passé composé; starting to use imparfait though the distinction with passé composé is shaky. Forms 'aller + infinitif' for plans (futur proche). Reflexive verbs (je me lève, il s'appelle) used correctly in routine cases.",
+    examples: [
+      "Quand j'étais enfant, je jouais au foot tous les jours.",
+      "Demain, je vais rendre visite à mes grands-parents.",
+    ],
+  },
+  {
+    min: 21, max: 25,
+    cefr: "A2 late", short: "consolidated A2",
+    description:
+      "About 1500 words. Solid passé composé / imparfait distinction. Expresses plans, simple opinions, gives directions. Active connectors: parce que, mais, aussi, en plus. Idioms understood mostly literally. Can describe past events in two or three connected sentences.",
+    examples: [
+      "Je vais étudier à la bibliothèque cet après-midi.",
+      "Je pense que le climat est meilleur dans le sud.",
+      "Tu dois tourner à gauche à la prochaine rue.",
+    ],
+  },
+  {
+    min: 26, max: 30,
+    cefr: "B1 early", short: "early B1",
+    description:
+      "About 2000-2500 words. Reasons and justifies opinions with mid-level connectors (bien que, cependant, par conséquent). Handles conditionnel présent for polite requests and basic hypotheticals. Starting to use pour / pour que distinction correctly.",
+    examples: [
+      "Si j'avais plus de temps, j'apprendrais aussi l'italien.",
+      "Bien que la voiture soit vieille, elle fonctionne encore bien.",
+      "Je voudrais réserver une table pour ce soir.",
+    ],
+  },
+  {
+    min: 31, max: 35,
+    cefr: "B1 mid", short: "mid B1",
+    description:
+      "Subjonctif présent solid in common triggers (il faut que, j'espère que, je ne pense pas que, pourvu que). Recounts moderately complex stories with multiple clauses. Beginning to handle reported speech in past contexts. Vocabulary breadth covers everyday + most travel/work topics.",
+    examples: [
+      "J'espère que ma sœur vienne nous voir bientôt.",
+      "Il m'a demandé que je l'aide avec le projet.",
+      "Je ne pense pas que ce soit une bonne idée d'aller au cinéma aujourd'hui.",
+    ],
+  },
+  {
+    min: 36, max: 40,
+    cefr: "B1 late", short: "consolidated B1",
+    description:
+      "About 3500 words. Longer narratives spanning past, present, and future. Beginning to grasp cultural references and idioms (avoir le mal du pays, ça m'est égal, s'entendre bien). Uses 'si + imparfait, conditionnel' for hypotheticals (si je savais, si j'avais).",
+    examples: [
+      "Si je connaissais la réponse, je te la dirais.",
+      "Quand j'étais étudiant, je rêvais de voyager partout en Amérique du Sud.",
+      "Tu me manques quand je suis loin.",
+    ],
+  },
+  {
+    min: 41, max: 45,
+    cefr: "B2 early", short: "early B2",
+    description:
+      "About 5000 words. Argues a position, supports it with examples. Uses indirect speech naturally (il m'a dit qu'il viendrait). Recognises cultural allusions (literature, history, sports) when context helps. Begins using a richer connector inventory (tandis que, en revanche, malgré le fait que).",
+    examples: [
+      "Il m'a dit qu'il viendrait tôt, mais il n'est toujours pas arrivé.",
+      "Bien que certains pensent que le cinéma a perdu sa pertinence, je crois qu'il est plus vital que jamais.",
+    ],
+  },
+  {
+    min: 46, max: 50,
+    cefr: "B2 mid", short: "mid B2",
+    description:
+      "Subjonctif passé (qu'il ait fait) integrated. Nuanced register awareness — knows when to use tu vs. vous, formal vs. casual lexicon. Discusses abstract themes (philosophy, politics) with effort but coherently. Can re-phrase a stuck idea on the fly.",
+    examples: [
+      "Peut-être que le discours t'a impressionné, mais à moi il m'a semblé superficiel.",
+      "La liberté individuelle et le bien collectif ne sont pas nécessairement opposés.",
+    ],
+  },
+  {
+    min: 51, max: 55,
+    cefr: "B2 late", short: "consolidated B2",
+    description:
+      "About 6500 words. Complex hypotheticals with plus-que-parfait + conditionnel passé (si j'avais su, j'aurais fait). Uses idiomatic expressions actively (tu me manques, se rendre compte, faire faux bond). Discusses film, books, politics with most vocabulary at hand. Speech remains a little effortful.",
+    examples: [
+      "Si j'avais étudié plus, j'aurais réussi l'examen sans problème.",
+      "Je lui manque chaque fois que je pars en voyage.",
+    ],
+  },
+  {
+    min: 56, max: 60,
+    cefr: "C1 early", short: "early C1",
+    description:
+      "About 8000 words. Nuanced stance-taking (nuancer, remettre en question, écarter). Plus-que-parfait du subjonctif in literary register (qu'il eût dit, qu'il eût été). Grasps wordplay, irony, and most idioms in context.",
+    examples: [
+      "Je nuance ce que j'ai dit avant : ce n'est pas que le système soit injuste, mais qu'il est mal conçu.",
+      "Comme si tu l'avais fait exprès, n'est-ce pas ?",
+    ],
+  },
+  {
+    min: 61, max: 65,
+    cefr: "C1 mid", short: "mid C1",
+    description:
+      "Natural discussion of complex topics — economics, ethics, art criticism. Detects regional variation (metropolitan French vs. Québécois vs. African French) consciously. Switches between more formal essay register and casual chat seamlessly.",
+    examples: [
+      "Le débat sur le revenu universel prend de l'ampleur dès que les économies occidentales acceptent que le plein emploi n'est plus un objectif réaliste.",
+    ],
+  },
+  {
+    min: 66, max: 70,
+    cefr: "C1 late", short: "consolidated C1",
+    description:
+      "Spontaneous speech in almost every situation. Grasps cultural depth (literary references, regional pop culture, political shorthand). Vocabulary gaps rarely interrupt flow — paraphrases gracefully when a specific word eludes them.",
+    examples: [
+      "Cela me rappelle la position de Camus dans L'Étranger — cette tension entre l'absurde et la révolte.",
+    ],
+  },
+  {
+    min: 71, max: 75,
+    cefr: "C2 early", short: "near-native C2",
+    description:
+      "Near-native. Precise word choice — distinguishes fine synonyms (prévenir vs. avertir, évoquer vs. mentionner). Uses argot and colloquial register actively without feeling foreign. Catches subtle pragmatic implications.",
+    examples: [
+      "Ce n'est pas que ça m'est égal, c'est que je préfère ne pas tomber dans le piège.",
+      "L'histoire de Paul, c'est dingue, t'es pas au courant ?",
+    ],
+  },
+  {
+    min: 76, max: 80,
+    cefr: "C2 mid", short: "mid C2",
+    description:
+      "About 12000+ words. Reads and discusses literary texts (Proust, Camus, Duras). Comfortable with rhetorical devices (anaphore, hypallage, litote). Can deliver structured oral arguments and improvise both formal and casual registers.",
+    examples: [
+      "L'œuvre de Proust inverse délibérément l'ordre attendu des événements, ce qui force le lecteur à reconstruire la chronologie — mais dans ce processus, il découvre quelque chose d'autre.",
+    ],
+  },
+  {
+    min: 81, max: 85,
+    cefr: "C2 late", short: "consolidated C2",
+    description:
+      "Specialised vocabulary across domains (legal, medical, technical) — recognises and uses with confidence. Switches register effortlessly from boardroom-formal to bar-stool casual. Catches double meanings, irony, sarcasm without prompting.",
+    examples: [
+      "La clause additionnelle exclut la responsabilité subsidiaire du garant en cas d'inexécution survenue pour cause de force majeure.",
+    ],
+  },
+  {
+    min: 86, max: 90,
+    cefr: "Beyond C2", short: "near-native adult",
+    description:
+      "Indistinguishable from an educated native adult in casual and most professional contexts. All registers available — vulgar slang to scholarly prose. Proverbs flow naturally; idiomatic phrasing is the default, not the exception.",
+    examples: [
+      "Il faut battre le fer pendant qu'il est chaud.",
+      "Petit à petit, l'oiseau fait son nid.",
+    ],
+  },
+  {
+    min: 91, max: 95,
+    cefr: "Educated native", short: "educated native",
+    description:
+      "Academic precision. Wields technical and professional vocabulary across multiple specialties (juridique, médical, philosophique, littéraire). Recognises archaic and literary registers — quotations from le Siècle d'Or feel natural. Mastery of subordination and stylistic variation.",
+    examples: [
+      "La causalité efficiente, en termes aristotéliciens, est subsumée par le principe de raison suffisante leibnizien — du moins dans sa lecture la plus stricte.",
+    ],
+  },
+  {
+    min: 96, max: 100,
+    cefr: "Master / notarial", short: "notary-level master",
+    description:
+      "Elite professional native — notaire, juge de Cassation, literary scholar, classical orator. Every word is the right word. Stylistic mastery across centuries of register, from medieval romance to modern bureaucratese. The kind of French you read in actes notariés and arrêts de la Cour de cassation.",
+    examples: [
+      "Par le présent acte, reçu par-devant moi, Notaire, comparaissent les parties intervenantes, libres et à leur demande, ayant la capacité légale nécessaire pour la passation du présent acte, et dont j'atteste l'identité.",
+    ],
+  },
+];
+
+const LEVEL_RANGES_BY_LANGUAGE: Record<string, LevelRange[]> = {
+  Spanish: LEVEL_RANGES_SPANISH,
+  French: LEVEL_RANGES_FRENCH,
+};
+
+/**
+ * Picks the level-ranges table for the target language. Falls back to
+ * Spanish for unknown languages — a safe default since the descriptions
+ * are largely CEFR-anchored and a Spanish range still gives the LLM
+ * useful information about the learner's proficiency.
+ */
+function getLevelRangesFor(targetLanguage: TargetLanguageSpec): LevelRange[] {
+  return LEVEL_RANGES_BY_LANGUAGE[targetLanguage.language] ?? LEVEL_RANGES_SPANISH;
+}
+
 /**
  * Returns the LevelRange covering the given 1-100 level. Clamps to
  * the first / last range for values outside the scale.
  */
-export function getLevelRange(level: number): LevelRange {
-  for (const r of LEVEL_RANGES) {
+export function getLevelRange(level: number, targetLanguage: TargetLanguageSpec): LevelRange {
+  const ranges = getLevelRangesFor(targetLanguage);
+  for (const r of ranges) {
     if (level >= r.min && level <= r.max) return r;
   }
-  return level < 1 ? LEVEL_RANGES[0] : LEVEL_RANGES[LEVEL_RANGES.length - 1];
+  return level < 1 ? ranges[0] : ranges[ranges.length - 1];
 }
 
 /**
@@ -250,8 +473,8 @@ export function getLevelRange(level: number): LevelRange {
  * adaptive level-tracker prompt so the LLM can place a learner's
  * production samples on the scale.
  */
-export function describeLevelScaleCompact(): string {
-  return LEVEL_RANGES.map(
+export function describeLevelScaleCompact(targetLanguage: TargetLanguageSpec): string {
+  return getLevelRangesFor(targetLanguage).map(
     (r) => `${r.min.toString().padStart(2, " ")}-${r.max} (${r.cefr}): ${r.short} — ${r.description.split(".")[0]}.`,
   ).join("\n");
 }
@@ -300,18 +523,15 @@ function lengthDirectiveForLevel(level: number): string {
  * level number + CEFR anchor + abilities + concrete examples + a
  * length directive + a "aim slightly above this" instruction. Used
  * in chat prompts where the AI message should target the learner's
- * complexity ceiling.
- *
- * targetLanguage is accepted for forward-compat with per-language
- * level ranges (Phase 2). Today the ranges are Spanish-specific;
- * Phase 2 will pick the right table based on this argument.
+ * complexity ceiling. Picks the per-language ranges table based on
+ * targetLanguage so the examples and grammar references match what
+ * the learner is actually studying.
  */
 export function describeLevelForPrompt(
   level: number,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  targetLanguage: import("./targetLanguage").TargetLanguageSpec,
+  targetLanguage: TargetLanguageSpec,
 ): string {
-  const r = getLevelRange(level);
+  const r = getLevelRange(level, targetLanguage);
   const targetCeiling = Math.min(100, r.max + 5);
   return [
     `Learner level: ${level}/100. Range ${r.min}-${r.max} (CEFR ${r.cefr}, "${r.short}").`,

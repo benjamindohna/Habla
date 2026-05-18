@@ -6,7 +6,8 @@ import AIBubble from "./AIBubble";
 import UserBubble from "./UserBubble";
 import SealedUserBubble from "./SealedUserBubble";
 import type { Topic } from "./TopicGrid";
-import { pickGreetingVerb } from "@/lib/greetingVerb";
+import { pickGreeting } from "@/lib/greetingVerb";
+import type { TargetLanguageSpec } from "@/lib/targetLanguage";
 import type { CorrectionResult } from "@/types/correction";
 
 interface TopicWithKind extends Topic {
@@ -28,6 +29,7 @@ interface ConversationViewProps {
   topic: string;
   initialMessages: InitialMessage[];
   nativeLanguage: string;
+  targetLanguage: TargetLanguageSpec;
   correctionStyle: CorrectionStyle;
   onBack: () => void;
   onLogout: () => void;
@@ -77,6 +79,7 @@ export default function ConversationView({
   topic: initialTopic,
   initialMessages,
   nativeLanguage,
+  targetLanguage,
   correctionStyle,
   onBack,
   onLogout,
@@ -101,12 +104,12 @@ export default function ConversationView({
   // Greeting verb rotates per empty-chat instance. Picked once on
   // mount (client-only so localStorage rotation works and we avoid SSR
   // mismatch), then stable for the lifetime of this view.
-  const [greetingVerb, setGreetingVerb] = useState<string | null>(null);
+  const [greeting, setGreeting] = useState<string | null>(null);
   useEffect(() => {
-    if (isEmpty && greetingVerb === null) {
-      setGreetingVerb(pickGreetingVerb());
+    if (isEmpty && greeting === null) {
+      setGreeting(pickGreeting(targetLanguage).sentence);
     }
-  }, [isEmpty, greetingVerb]);
+  }, [isEmpty, greeting, targetLanguage]);
 
   // Inline topic picker (visible only while the chat is empty).
   const [topicPickerOpen, setTopicPickerOpen] = useState(false);
@@ -365,10 +368,10 @@ export default function ConversationView({
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pt-10 pb-6">
         <div className="w-full max-w-3xl mx-auto space-y-6">
-          {isEmpty && greetingVerb && (
+          {isEmpty && greeting && (
             <div className="flex flex-col items-center justify-center pt-16">
               <h1 className="text-2xl font-semibold tracking-tight text-center text-neutral-800">
-                Hola, ¿de qué quieres {greetingVerb} hoy?
+                {greeting}
               </h1>
               <p className="mt-3 text-sm text-neutral-400 text-center">
                 Sprich einfach drauflos oder wähle ein Thema.

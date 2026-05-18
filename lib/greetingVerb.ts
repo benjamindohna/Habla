@@ -1,35 +1,26 @@
-// Picks a verb for the empty-chat greeting "¿De qué quieres ___ hoy?".
+// Picks a verb for the empty-chat greeting "¿De qué quieres ___ hoy?"
+// (or the French equivalent). The verb list and frame come from the
+// per-language data table in promptExamples.ts; only the rotation
+// state (last `MEMORY_SIZE` picks) is held here.
 //
-// Curated so each entry slots cleanly into the frame and reads as
-// natural Castellano. Anything weird (chatear → registers as messaging,
-// rajar → too slangy, tratar → wrong preposition) is intentionally
-// left out.
-//
-// Rotation: last `MEMORY_SIZE` picks are excluded from the next pool
-// via localStorage. State survives reloads but is per-browser; no
-// server state needed for what is essentially a cosmetic touch.
+// Rotation memory survives reloads via localStorage. Per-language key
+// so switching languages mid-session doesn't bleed Spanish "recent"
+// picks into the French pool or vice versa.
 
-const VERBS = [
-  "hablar",
-  "charlar",
-  "conversar",
-  "dialogar",
-  "platicar",
-  "parlotear",
-  "cotillear",
-  "chismorrear",
-  "debatir",
-  "comentar",
-  "departir",
-] as const;
+import { getPromptExamples } from "./promptExamples";
+import type { TargetLanguageSpec } from "./targetLanguage";
 
-const STORAGE_KEY = "greetingVerbRecent";
+const STORAGE_KEY_PREFIX = "greetingVerbRecent:";
 const MEMORY_SIZE = 3;
 
-function readRecent(): string[] {
+function storageKey(spec: TargetLanguageSpec): string {
+  return `${STORAGE_KEY_PREFIX}${spec.language}`;
+}
+
+function readRecent(key: string): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -39,25 +30,38 @@ function readRecent(): string[] {
   }
 }
 
-function writeRecent(recent: string[]): void {
+function writeRecent(key: string, recent: string[]): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(recent));
+    window.localStorage.setItem(key, JSON.stringify(recent));
   } catch {
     // quota / private mode — degraded experience, not worth surfacing.
   }
 }
 
-/** Pick a verb, excluding the last MEMORY_SIZE picks. Updates the
- *  rolling memory so the next call sees this pick as "recent". */
-export function pickGreetingVerb(): string {
-  const recent = readRecent();
-  const pool = VERBS.filter((v) => !recent.includes(v));
-  // Defensive: if MEMORY_SIZE ≥ VERBS.length the pool would be empty.
-  // Falling back to the full list still rotates, just with weaker
-  // memory.
-  const candidates = pool.length > 0 ? pool : (VERBS as readonly string[]);
+/**
+ * Pick a verb for the given target language, excluding the last
+ * MEMORY_SIZE picks for THAT language. Updates the rolling memory so
+ * the next call sees this pick as "recent".
+ */
+export function pickGreetingVerb(targetLanguage: TargetLanguageSpec): string {
+  const verbs = getPromptExamples(targetLanguage).greetingVerbs;
+  const key = storageKey(targetLanguage);
+  const recent = readRecent(key);
+  const pool = verbs.filter((v) => !recent.includes(v));
+  const candidates = pool.length > 0 ? pool : verbs;
   const picked = candidates[Math.floor(Math.random() * candidates.length)];
-  writeRecent([...recent, picked].slice(-MEMORY_SIZE));
+  writeRecent(key, [...recent, picked].slice(-MEMORY_SIZE));
   return picked;
+}
+
+/**
+ * Convenience: pick a verb AND render the full greeting using the
+ * per-language frame. Returns e.g. "Hola, ¿de qué quieres charlar hoy?"
+ * or "Salut, de quoi veux-tu papoter aujourd'hui ?".
+ */
+export function pickGreeting(targetLanguage: TargetLanguageSpec): { verb: string; sentence: string } {
+  const verb = pickGreetingVerb(targetLanguage);
+  const sentence = getPromptExamples(targetLanguage).greetingFrame(verb);
+  return { verb, sentence };
 }

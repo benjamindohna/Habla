@@ -5,14 +5,45 @@ import { useRouter } from "next/navigation";
 
 type CorrectionStyle = "natural" | "transcript_aware";
 
+interface TargetLanguageSpec {
+  language: string;
+  location: string | null;
+  style: "everyday" | "street" | "office";
+}
+
 interface Me {
   id: number;
   email: string;
   nativeLanguage: string;
+  targetLanguage: TargetLanguageSpec;
   level: number;
   interests: string[];
   interestsText: string;
   correctionStyle: CorrectionStyle;
+}
+
+// Presets surfaced in the homepage picker. The DB stores the full
+// TargetLanguageSpec — these are just the UI shortcuts.
+const LANGUAGE_PRESETS: Array<{ key: string; label: string; spec: TargetLanguageSpec }> = [
+  {
+    key: "es-castellano",
+    label: "Spanisch (Castellano)",
+    spec: { language: "Spanish", location: "castellano", style: "everyday" },
+  },
+  {
+    key: "fr-metropolitan",
+    label: "Französisch",
+    spec: { language: "French", location: null, style: "everyday" },
+  },
+];
+
+function presetKeyFor(spec: TargetLanguageSpec): string {
+  for (const p of LANGUAGE_PRESETS) {
+    if (p.spec.language === spec.language && (p.spec.location ?? null) === (spec.location ?? null)) {
+      return p.key;
+    }
+  }
+  return LANGUAGE_PRESETS[0].key;
 }
 
 interface RecentConversation {
@@ -96,6 +127,27 @@ export default function Page() {
     }
   }
 
+  async function handleLanguageChange(presetKey: string) {
+    if (!me) return;
+    const preset = LANGUAGE_PRESETS.find((p) => p.key === presetKey);
+    if (!preset) return;
+    if (preset.spec.language === me.targetLanguage.language && (preset.spec.location ?? null) === (me.targetLanguage.location ?? null)) {
+      return;
+    }
+    const previous = me.targetLanguage;
+    setMe({ ...me, targetLanguage: preset.spec });
+    try {
+      const res = await fetch("/api/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetLanguage: preset.spec }),
+      });
+      if (!res.ok) throw new Error("update failed");
+    } catch {
+      setMe({ ...me, targetLanguage: previous });
+    }
+  }
+
   async function handleStartChat() {
     if (starting) return;
     setStarting(true);
@@ -120,18 +172,32 @@ export default function Page() {
 
   return (
     <main className="flex min-h-screen flex-col items-center px-4 py-8">
-      <div className="w-full max-w-xl flex items-center justify-between mb-12">
-        <label className="flex items-center gap-2 text-xs text-neutral-400">
-          Correction style
-          <select
-            value={me.correctionStyle}
-            onChange={(e) => handleStyleChange(e.target.value as CorrectionStyle)}
-            className="text-xs text-neutral-600 bg-transparent border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:border-neutral-400 cursor-pointer"
-          >
-            <option value="natural">Natural Spanish</option>
-            <option value="transcript_aware">Stay close to my words</option>
-          </select>
-        </label>
+      <div className="w-full max-w-xl flex items-center justify-between mb-12 gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="flex items-center gap-2 text-xs text-neutral-400">
+            Sprache
+            <select
+              value={presetKeyFor(me.targetLanguage)}
+              onChange={(e) => handleLanguageChange(e.target.value)}
+              className="text-xs text-neutral-600 bg-transparent border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:border-neutral-400 cursor-pointer"
+            >
+              {LANGUAGE_PRESETS.map((p) => (
+                <option key={p.key} value={p.key}>{p.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-neutral-400">
+            Correction style
+            <select
+              value={me.correctionStyle}
+              onChange={(e) => handleStyleChange(e.target.value as CorrectionStyle)}
+              className="text-xs text-neutral-600 bg-transparent border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:border-neutral-400 cursor-pointer"
+            >
+              <option value="natural">Natural</option>
+              <option value="transcript_aware">Stay close to my words</option>
+            </select>
+          </label>
+        </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1">
             <span className="text-xs text-neutral-500 tabular-nums">Level {me.level}</span>

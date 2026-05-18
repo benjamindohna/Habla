@@ -6,10 +6,17 @@ import ConversationView, { type InitialMessage } from "@/components/Conversation
 
 type CorrectionStyle = "natural" | "transcript_aware";
 
+interface TargetLanguageSpec {
+  language: string;
+  location: string | null;
+  style: "everyday" | "street" | "office";
+}
+
 interface Me {
   id: number;
   email: string;
   nativeLanguage: string;
+  targetLanguage: TargetLanguageSpec;
   level: number;
   interests: string[];
   interestsText: string;
@@ -109,6 +116,7 @@ export default function ChatPage() {
       topic={state.data.conversation.topic}
       initialMessages={initialMessages}
       nativeLanguage={state.me.nativeLanguage}
+      targetLanguage={state.me.targetLanguage}
       correctionStyle={state.me.correctionStyle}
       onBack={() => router.push("/")}
       onLogout={async () => {
