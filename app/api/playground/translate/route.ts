@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
       word,
       wordIndex,
       nativeLanguage: user.nativeLanguage,
+      targetLanguage: user.targetLanguage,
     });
     return NextResponse.json(result);
   } catch (err) {

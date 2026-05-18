@@ -1,7 +1,7 @@
 import { chatJSON } from "./llm";
 import { getDb } from "./db";
 import { getUserById } from "./users";
-import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
+import { describeTargetLanguage, type TargetLanguageSpec } from "./targetLanguage";
 
 export interface Topic {
   target: string;
@@ -19,10 +19,11 @@ function buildPrompt(args: {
   interestsText: string;
   interests: InterestRow[];
   exclude: string[];
+  targetLanguage: TargetLanguageSpec;
 }): string {
-  const { nativeLanguage, interestsText, interests, exclude } = args;
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
+  const { nativeLanguage, interestsText, interests, exclude, targetLanguage } = args;
+  const target = describeTargetLanguage(targetLanguage);
+  const targetName = targetLanguage.language;
 
   const tagLines = interests.length
     ? interests.map((r) => `  - ${r.interest}${r.is_recent ? " [recent]" : ""}`).join("\n")
@@ -94,6 +95,7 @@ export async function generateTopicsForUser(
     interestsText: user.interestsText,
     interests: interests.slice(0, 12),
     exclude,
+    targetLanguage: user.targetLanguage,
   });
 
   const parsed = await chatJSON<{ topics?: unknown }>({

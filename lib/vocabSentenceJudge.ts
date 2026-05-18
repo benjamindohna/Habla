@@ -10,6 +10,7 @@
 // the same stage.
 
 import { chatText } from "./llm";
+import type { TargetLanguageSpec } from "./targetLanguage";
 import type { VocabJudgement } from "./vocab";
 
 export interface SentenceJudgeArgs {
@@ -21,7 +22,7 @@ export interface SentenceJudgeArgs {
   /** The full sentence the learner typed. */
   user_sentence: string;
   /** e.g. "Spanish". */
-  target_language: string;
+  targetLanguage: TargetLanguageSpec;
   /** e.g. "German". */
   native_language: string;
 }
@@ -50,7 +51,7 @@ export interface SentenceJudgeArgs {
  * write a grammatically perfect sentence.
  */
 export async function judgeVocabSentence(args: SentenceJudgeArgs): Promise<VocabJudgement> {
-  const prompt = `You are evaluating a vocabulary PRODUCTION exercise. The learner is studying ${args.target_language}; their native language is ${args.native_language}.
+  const prompt = `You are evaluating a vocabulary PRODUCTION exercise. The learner is studying ${args.targetLanguage.language}; their native language is ${args.native_language}.
 
 The learner was shown the word "${args.target_word}" (sense: "${args.tested_description}") and asked to produce a sentence that uses this word and demonstrates they understand its meaning.
 
@@ -60,7 +61,7 @@ You are testing ONE thing: does the learner know what THIS sense of the word mea
 
 These are EXPECTED at the learner's level and are NEVER fail signals:
 - Grammar errors anywhere except on the target word itself: missing articles, wrong gender, wrong subject-verb agreement, wrong conjugation of OTHER words, missing prepositions, wrong word order.
-- ${args.native_language} words mixed in. The learner falls back to their native language for words they don't yet know in ${args.target_language}. This is the norm at every level below near-native. A sentence can be 80% ${args.native_language} and still be valid if the target word is correctly used in context.
+- ${args.native_language} words mixed in. The learner falls back to their native language for words they don't yet know in ${args.targetLanguage.language}. This is the norm at every level below near-native. A sentence can be 80% ${args.native_language} and still be valid if the target word is correctly used in context.
 - Awkward phrasing, run-on sentences, missing punctuation, weird capitalisation.
 - Very short sentences (one clause), as long as the clause anchors the meaning.
 
@@ -68,9 +69,12 @@ Focus only on the target word. Everything else can be ugly.
 
 ═════ DECISION TREE ═════
 
-Step 1 — Does "${args.target_word}" appear in the sentence in EXACTLY the same form (case-insensitive, diacritics required)?
-  - No, or in a different inflected/lemmatised form → return 0.
-  - Yes → go to Step 2.
+Step 1 — Does the target word appear in the sentence with the same LEXICAL CORE?
+  - Comparison is case-insensitive but diacritics required.
+  - ARTICLE-TOLERANT for nouns: if the target word starts with an article (Spanish el/la/los/las/un/una/unos/unas; equivalent determiners in other languages), that article is OPTIONAL in the learner's sentence — and the learner may use any article (different gender, indefinite vs definite) without penalty. The lexical core is the noun itself; article mismatches do NOT make the form wrong. Likewise, if the target word has NO article, the learner may freely add one. What matters is the noun stem.
+  - For non-noun targets (verbs, adjectives, fixed phrases, multi-word segments), require the exact form (case-insensitive, diacritics required). Verb / adjective inflections that differ from the target → return 0.
+  - If the word is absent entirely, or appears only in a different inflected/lemmatised form (e.g. infinitive when conjugated form was asked) → return 0.
+  - Otherwise → go to Step 2.
 
 Step 2 — Look at the sentence around the word. Which sense of the word does it require?
   - The TESTED sense → go to Step 3.
@@ -123,6 +127,19 @@ Tested word: "banco" — sense: "financial institution / bank where you deposit 
   "El perro estaba durmiendo en el banco." → X   (dog sleeping ON the bench — bench-sense, not financial)
   "El banco está cerrado."                  → 0   (generic — both senses can be "closed")
 
+Tested word: "el buceo" — sense: "scuba diving"
+  "Quiero practicar el buceo en el agua."   → 1   (verbatim with article)
+  "Quiero practicar buceo en el agua."      → 1   (article omitted — accept; article-tolerant)
+  "Voy a hacer un buceo profundo en Tailandia." → 1   (different article — accept; "un" instead of "el")
+  "Yo bucear en el mar."                     → 0   (verb form "bucear", not the noun "buceo")
+  "Me gusta el deporte."                     → 0   (word absent)
+
+Tested word: "paz" — sense: "tranquility / inner peace"
+  "Después del yoga siento mucha paz."      → 1   (verbatim, anchor "yoga" → inner peace)
+  "Me gusta la paz interior."                → 1   (article added — accept; target had no article)
+  "Me gusta el paz, no me gusta Krieg."      → 1   (wrong-gender article "el" — accept; lexical core "paz" present, peace-vs-war anchor)
+  "No me gusta la guerra."                   → 0   (paz absent)
+
 Tested word: "haya impresionado" — sense: "has impressed (subjunctive perfect)"
   "Quizás te haya impresionado el partido." → 1   (subjunctive trigger "quizás", meaningful object)
   "Espero que les haya impresionado."        → 1   (subjunctive trigger "espero que", object pronoun)
@@ -150,4 +167,82 @@ Reply with exactly one character: 1, X, or 0. No explanation, no punctuation, no
   // under-credit (user re-encounters the card) than over-credit.
   const match = raw.match(/[1X0]/);
   return (match ? match[0] : "0") as VocabJudgement;
+}
+
+export interface SentenceMistakeArgs {
+  target_word: string;
+  tested_description: string;
+  /** Native-language translation of the target word (from explain cache).
+   *  May be empty when the cache hasn't been populated yet. */
+  native_translation: string;
+  user_sentence: string;
+  targetLanguage: TargetLanguageSpec;
+  native_language: string;
+}
+
+/**
+ * After judgeVocabSentence returns 0, produce a short native-language
+ * explanation of what went wrong WITH RESPECT TO THE TARGET WORD ONLY.
+ * The explainer is briefed on the same rubric the judge used so its
+ * diagnosis stays consistent: word missing / wrong form / generic
+ * sentence / wrong sense. Grammar errors elsewhere are off-limits as
+ * topics — those are not failure reasons per the judge prompt.
+ */
+export async function explainSentenceMistake(args: SentenceMistakeArgs): Promise<string> {
+  const prompt = `You are a ${args.targetLanguage.language} vocabulary tutor giving feedback to a ${args.native_language}-native learner.
+
+A judge has marked their sentence as INCORRECT for one specific word. Your job: explain in 1–2 short ${args.native_language} sentences what they did wrong WITH RESPECT TO THE TARGET WORD ONLY.
+
+═════ THE RUBRIC THE JUDGE USED ═════
+
+A sentence fails (verdict 0) for exactly one of these reasons:
+1. WORD MISSING: the target word doesn't appear in the sentence at all.
+2. WRONG FORM: the target word appears in a different inflected / lemmatised form (e.g. "comer" when "comió" was asked; "el paz" when "paz" was asked — i.e. wrong gender attached as article).
+3. TOO GENERIC: the word appears verbatim, but the sentence around it is so generic that replacing the word with a placeholder would still parse meaningfully ("Er hat sich X").
+4. WRONG SENSE WITHOUT ANCHOR: word verbatim, but the sentence neither points to the tested sense nor to any other well-known sense — meaning unclear.
+
+NOT failure reasons (do NOT mention these as the problem):
+- Grammar errors anywhere else in the sentence.
+- ${args.native_language} words mixed in.
+- Awkward phrasing, missing punctuation, capitalisation.
+
+═════ INSTRUCTIONS ═════
+
+Pick whichever failure mode best fits the learner's sentence and give a 1–2 sentence ${args.native_language} explanation. Be concrete and specific to THIS sentence — quote the actual word form they used if relevant. Stay friendly and brief. No preamble like "Du hast...". Reply in ${args.native_language} only.
+
+═════ EXAMPLES (Spanish target, German native — same logic applies to any pair) ═════
+
+Target: "comió" (sense: "ate, 3rd person past") · Translation: "(er/sie) aß"
+Sentence: "yo comer pizza."
+→ Du hast die Form "comer" benutzt — das ist der Infinitiv. Gefragt war "comió", die Vergangenheit für er/sie.
+
+Target: "verbessern" (sense: "to improve") · Translation: "verbessern"
+Sentence: "Er möchte sich verbessern."
+→ Dein Satz ist zu allgemein — "sich verbessern" passt zu fast jeder Selbstverbesserung. Zeig konkret, WAS verbessert wird (Sprache, System, Note…).
+
+Target: "el buceo" (sense: "scuba diving") · Translation: "das Tauchen"
+Sentence: "me gusta el deporte."
+→ Du hast das Wort "el buceo" gar nicht in deinem Satz verwendet.
+
+Target: "paz" (sense: "tranquility") · Translation: "die Ruhe / der Frieden"
+Sentence: "me gusta el paz."
+→ Du hast "el paz" geschrieben — "paz" ist feminin, also "la paz". Die exakte Form mit korrektem Artikel war gefragt.
+
+═════ NOW EVALUATE ═════
+
+Target word: "${args.target_word}"
+Sense being tested (English): "${args.tested_description}"
+${args.native_translation ? `${args.native_language} translation: "${args.native_translation}"` : ""}
+Learner's sentence: "${args.user_sentence}"
+
+Reply with 1–2 short sentences in ${args.native_language}. No bullet points, no quotes around your reply, no preamble.`;
+
+  const raw = await chatText({
+    task: "chat_light",
+    label: "vocab/sentence-mistake",
+    systemPrompt: prompt,
+    temperature: 0.3,
+    maxTokens: 120,
+  });
+  return raw.trim();
 }

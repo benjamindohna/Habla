@@ -1,4 +1,9 @@
 import { getDb } from "./db";
+import {
+  INITIAL_TARGET_SEED,
+  parseTargetLanguageSpec,
+  type TargetLanguageSpec,
+} from "./targetLanguage";
 
 export type CorrectionStyle = "natural" | "transcript_aware";
 
@@ -7,6 +12,9 @@ export interface User {
   email: string;
   passwordHash: string;
   nativeLanguage: string;
+  /** The language this user is learning + region/style. Threaded into
+   *  every prompt-creating function from the session. */
+  targetLanguage: TargetLanguageSpec;
   level: number;
   interestsText: string;
   correctionStyle: CorrectionStyle;
@@ -18,6 +26,7 @@ interface UserRow {
   email: string;
   password_hash: string;
   native_language: string;
+  target_language_json: string;
   level: number;
   interests_text: string;
   correction_style: string;
@@ -30,6 +39,7 @@ function rowToUser(row: UserRow): User {
     email: row.email,
     passwordHash: row.password_hash,
     nativeLanguage: row.native_language,
+    targetLanguage: parseTargetLanguageSpec(row.target_language_json),
     level: row.level,
     interestsText: row.interests_text,
     correctionStyle: (row.correction_style === "transcript_aware" ? "transcript_aware" : "natural"),
@@ -55,28 +65,38 @@ export function upsertUser(input: {
   email: string;
   passwordHash: string;
   nativeLanguage?: string;
+  targetLanguage?: TargetLanguageSpec;
   level?: number;
   interestsText?: string;
 }): User {
   const db = getDb();
+  const targetJson = JSON.stringify(input.targetLanguage ?? INITIAL_TARGET_SEED);
   db.prepare(
-    `INSERT INTO users (email, password_hash, native_language, level, interests_text)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO users (email, password_hash, native_language, target_language_json, level, interests_text)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(email) DO UPDATE SET
-       password_hash   = excluded.password_hash,
-       native_language = excluded.native_language,
-       level           = excluded.level,
-       interests_text  = excluded.interests_text`,
+       password_hash         = excluded.password_hash,
+       native_language       = excluded.native_language,
+       target_language_json  = excluded.target_language_json,
+       level                 = excluded.level,
+       interests_text        = excluded.interests_text`,
   ).run(
     input.email,
     input.passwordHash,
     input.nativeLanguage ?? "German",
+    targetJson,
     input.level ?? 30,
     input.interestsText ?? "",
   );
   const user = getUserByEmail(input.email);
   if (!user) throw new Error(`Failed to upsert user ${input.email}`);
   return user;
+}
+
+export function setUserTargetLanguage(userId: number, spec: TargetLanguageSpec): void {
+  getDb()
+    .prepare("UPDATE users SET target_language_json = ? WHERE id = ?")
+    .run(JSON.stringify(spec), userId);
 }
 
 export function getUserInterests(userId: number): string[] {
@@ -113,4 +133,3 @@ export function setUserCorrectionStyle(userId: number, style: CorrectionStyle): 
   const db = getDb();
   db.prepare("UPDATE users SET correction_style = ? WHERE id = ?").run(style, userId);
 }
-

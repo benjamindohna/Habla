@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
       topic,
       level: user.level,
       nativeLanguage: user.nativeLanguage,
+      targetLanguage: user.targetLanguage,
     });
     return NextResponse.json({ text });
   } catch (err) {

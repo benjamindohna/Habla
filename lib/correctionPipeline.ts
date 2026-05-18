@@ -5,7 +5,7 @@
 // nativeLanguage/style produces the same output.
 
 import { chatJSON, type ChatTask } from "./llm";
-import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
+import { describeTargetLanguage, type TargetLanguageSpec } from "./targetLanguage";
 import type { Pair } from "@/types/correction";
 
 export type CorrectionStyle = "natural" | "transcript_aware";
@@ -21,8 +21,9 @@ export interface Interpretation {
 export async function interpret(
   transcript: string,
   nativeLanguage: string,
+  targetLanguage: TargetLanguageSpec,
 ): Promise<Interpretation> {
-  const targetName = DEFAULT_TARGET.language;
+  const targetName = targetLanguage.language;
   const systemPrompt = `You are a bilingual interpretation assistant. A language learner is trying to speak ${targetName} but may mix in their native language (${nativeLanguage}) and may have grammar mistakes or unnatural phrasing.
 
 Read the transcript and output what the person most likely intended to say, in ${nativeLanguage}. Do not produce ${targetName} output.
@@ -55,9 +56,9 @@ Return ONLY valid JSON:
 
 // ── localize ─────────────────────────────────────────────────────────────
 
-function naturalPrompt(nativeLanguage: string): string {
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
+function naturalPrompt(nativeLanguage: string, targetLanguage: TargetLanguageSpec): string {
+  const target = describeTargetLanguage(targetLanguage);
+  const targetName = targetLanguage.language;
   return `You are a native ${targetName} speaker. Your job is to express the given meaning in natural, ${target} as it would be spoken in casual conversation.
 
 Rules:
@@ -71,9 +72,9 @@ Return ONLY valid JSON:
 { "local_version_target": "string" }`;
 }
 
-function transcriptAwarePrompt(nativeLanguage: string): string {
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
+function transcriptAwarePrompt(nativeLanguage: string, targetLanguage: TargetLanguageSpec): string {
+  const target = describeTargetLanguage(targetLanguage);
+  const targetName = targetLanguage.language;
   return `You are a ${targetName}-language correction engine for a learner.
 
 You receive two inputs:
@@ -101,6 +102,7 @@ export async function localize(args: {
   intendedMeaning: string;
   transcript?: string;
   nativeLanguage: string;
+  targetLanguage: TargetLanguageSpec;
   style: CorrectionStyle;
   /** Override the model tier. Defaults to chat_precise (gpt-4o) for
    *  production correctness. The /playground/correct-test page passes
@@ -109,8 +111,8 @@ export async function localize(args: {
 }): Promise<string> {
   const useTranscript = args.style === "transcript_aware" && args.transcript?.trim();
   const systemPrompt = useTranscript
-    ? transcriptAwarePrompt(args.nativeLanguage)
-    : naturalPrompt(args.nativeLanguage);
+    ? transcriptAwarePrompt(args.nativeLanguage, args.targetLanguage)
+    : naturalPrompt(args.nativeLanguage, args.targetLanguage);
   const userContent = useTranscript
     ? `TRANSCRIPT: "${args.transcript!.trim()}"\nINTENT: "${args.intendedMeaning}"`
     : args.intendedMeaning;
@@ -141,9 +143,10 @@ function segmentPromptV2(
   nativeLanguage: string,
   localVersionTarget: string,
   transcript: string,
+  targetLanguage: TargetLanguageSpec,
 ): string {
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
+  const target = describeTargetLanguage(targetLanguage);
+  const targetName = targetLanguage.language;
   return `You are a sentence-alignment engine for language learning.
 
 Your job: compare two sentences and produce ordered segment pairs showing the learner exactly which parts they got right and which differ.
@@ -250,9 +253,14 @@ Return ONLY valid JSON:
 }`;
 }
 
-function segmentPrompt(nativeLanguage: string, localVersionTarget: string, transcript: string): string {
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
+function segmentPrompt(
+  nativeLanguage: string,
+  localVersionTarget: string,
+  transcript: string,
+  targetLanguage: TargetLanguageSpec,
+): string {
+  const target = describeTargetLanguage(targetLanguage);
+  const targetName = targetLanguage.language;
   return `You are a sentence-alignment engine for language learning.
 
 The learner's native language is: ${nativeLanguage}
@@ -404,6 +412,7 @@ export async function segment(args: {
   transcript: string;
   localVersionTarget: string;
   nativeLanguage: string;
+  targetLanguage: TargetLanguageSpec;
   /** Override the model tier. Production default is chat_light
    *  (gpt-4o-mini): empirically mini does BETTER segmentation than 4o
    *  on this prompt — 4o tends to over-merge correct user parts into
@@ -421,7 +430,7 @@ export async function segment(args: {
   const { pairs } = await chatJSON<{ pairs: Pair[] }>({
     task,
     label: `segment/${task}${useV2 ? "/v2" : ""}`,
-    userPrompt: buildPrompt(args.nativeLanguage, args.localVersionTarget, args.transcript),
+    userPrompt: buildPrompt(args.nativeLanguage, args.localVersionTarget, args.transcript, args.targetLanguage),
   });
   const normalized = normalizePairs(pairs);
   warnIfCoverageBroken(normalized, args.transcript, args.localVersionTarget);

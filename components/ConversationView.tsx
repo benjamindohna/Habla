@@ -5,7 +5,13 @@ import AudioRecorder from "./AudioRecorder";
 import AIBubble from "./AIBubble";
 import UserBubble from "./UserBubble";
 import SealedUserBubble from "./SealedUserBubble";
+import type { Topic } from "./TopicGrid";
+import { pickGreetingVerb } from "@/lib/greetingVerb";
 import type { CorrectionResult } from "@/types/correction";
+
+interface TopicWithKind extends Topic {
+  kind: "match" | "related" | "random";
+}
 
 type CorrectionStyle = "natural" | "transcript_aware";
 
@@ -68,7 +74,7 @@ async function correctTranscript(args: {
 
 export default function ConversationView({
   conversationId,
-  topic,
+  topic: initialTopic,
   initialMessages,
   nativeLanguage,
   correctionStyle,
@@ -83,7 +89,101 @@ export default function ConversationView({
     ),
   );
   const [pending, setPending] = useState<PendingStatus>({ stage: "idle" });
+  const [topic, setTopic] = useState<string>(initialTopic ?? "");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Empty-chat state: the conversation has no messages yet. Drives the
+  // inline topic picker visibility and the empty-state placeholder.
+  // Recomputed whenever messages change — once an AI opener arrives or
+  // the user records anything, the picker disappears.
+  const isEmpty = messages.length === 0;
+
+  // Greeting verb rotates per empty-chat instance. Picked once on
+  // mount (client-only so localStorage rotation works and we avoid SSR
+  // mismatch), then stable for the lifetime of this view.
+  const [greetingVerb, setGreetingVerb] = useState<string | null>(null);
+  useEffect(() => {
+    if (isEmpty && greetingVerb === null) {
+      setGreetingVerb(pickGreetingVerb());
+    }
+  }, [isEmpty, greetingVerb]);
+
+  // Inline topic picker (visible only while the chat is empty).
+  const [topicPickerOpen, setTopicPickerOpen] = useState(false);
+  const [topics, setTopics] = useState<TopicWithKind[] | null>(null);
+  const [topicsError, setTopicsError] = useState<string | null>(null);
+  const [rerolling, setRerolling] = useState(false);
+  const [pickingTopic, setPickingTopic] = useState<string | null>(null);
+
+  // Pre-load topics as soon as we know the chat is empty — the
+  // /api/topics/current endpoint is a plain DB read against the
+  // already-rotated `current` set (the `next` set is also pre-
+  // generated server-side, so re-roll is also instant). By the time
+  // the user taps "Thema ▴" the array is already in state, so the
+  // picker opens with content, not a spinner.
+  useEffect(() => {
+    if (!isEmpty || topics !== null) return;
+    let cancelled = false;
+    fetch("/api/topics/current")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load topics"))))
+      .then((data: { topics: TopicWithKind[] }) => {
+        if (!cancelled) setTopics(data.topics);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) {
+          setTopics([]);
+          setTopicsError(err.message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isEmpty, topics]);
+
+  async function handleReroll() {
+    if (rerolling) return;
+    setRerolling(true);
+    setTopicsError(null);
+    try {
+      const res = await fetch("/api/topics/reroll", { method: "POST" });
+      if (!res.ok) throw new Error("Re-roll failed");
+      const data = (await res.json()) as { topics: TopicWithKind[] };
+      setTopics(data.topics);
+    } catch (err) {
+      setTopicsError((err as Error).message);
+    } finally {
+      setRerolling(false);
+    }
+  }
+
+  async function handleTopicPick(picked: Topic) {
+    if (pickingTopic || !isEmpty) return;
+    setPickingTopic(picked.target);
+    // Fire-and-forget interest harvest, matches the old homepage flow.
+    fetch("/api/me/interests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ interest: picked.target }),
+    }).catch(() => {});
+    try {
+      const res = await fetch("/api/converse/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId, topic: picked.target }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { conversationId: number; text: string };
+      setTopic(picked.target);
+      setMessages([
+        { id: crypto.randomUUID(), role: "ai", text: data.text, isFresh: true },
+      ]);
+      setTopicPickerOpen(false);
+    } catch (err) {
+      console.error("[handleTopicPick]", err);
+    } finally {
+      setPickingTopic(null);
+    }
+  }
 
   // Auto-Read toggle: when on, every fresh AI bubble auto-plays its TTS
   // when preload finishes, and every fresh user bubble auto-plays the
@@ -178,7 +278,8 @@ export default function ConversationView({
         }),
       });
       if (!res.ok) throw new Error("Reply failed");
-      const data = (await res.json()) as { text: string };
+      const data = (await res.json()) as { text: string; derivedTopic?: string };
+      if (data.derivedTopic) setTopic(data.derivedTopic);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === loadingId && m.role === "ai"
@@ -203,12 +304,19 @@ export default function ConversationView({
   }
 
   function handleBack() {
-    // Fire-and-forget: harvest interests + invalidate the stale 'next' topic
-    // set so future re-rolls reflect this conversation. User navigates home
-    // immediately; if the network call lags or fails, no UX impact.
-    fetch(`/api/conversations/${conversationId}/extract`, {
-      method: "POST",
-    }).catch(() => {});
+    if (isEmpty) {
+      // User abandoned an empty chat — delete the row so it doesn't
+      // pollute history. Fire-and-forget; navigation happens immediately
+      // either way. Server-side guards prevent deletion of non-empty
+      // chats, so a race between this and a just-sent message is safe.
+      fetch(`/api/conversations/${conversationId}`, { method: "DELETE" }).catch(() => {});
+    } else {
+      // Non-empty chat: harvest interests + invalidate the stale 'next'
+      // topic set so future re-rolls reflect this conversation.
+      fetch(`/api/conversations/${conversationId}/extract`, {
+        method: "POST",
+      }).catch(() => {});
+    }
     onBack();
   }
 
@@ -227,7 +335,9 @@ export default function ConversationView({
           >
             ← Back
           </button>
-          <p className="text-sm font-medium text-neutral-700 truncate flex-1 text-center">{topic}</p>
+          <p className="text-sm font-medium text-neutral-700 truncate flex-1 text-center">
+            {topic || "Neuer Chat"}
+          </p>
           <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => setAutoRead((v) => !v)}
@@ -255,6 +365,17 @@ export default function ConversationView({
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pt-10 pb-6">
         <div className="w-full max-w-3xl mx-auto space-y-6">
+          {isEmpty && greetingVerb && (
+            <div className="flex flex-col items-center justify-center pt-16">
+              <h1 className="text-2xl font-semibold tracking-tight text-center text-neutral-800">
+                Hola, ¿de qué quieres {greetingVerb} hoy?
+              </h1>
+              <p className="mt-3 text-sm text-neutral-400 text-center">
+                Sprich einfach drauflos oder wähle ein Thema.
+              </p>
+            </div>
+          )}
+
           {messages.map((msg) => {
             if (msg.role === "ai") {
               return (
@@ -309,10 +430,90 @@ export default function ConversationView({
         </div>
       </div>
 
-      {/* Recorder */}
+      {/* Recorder + (when empty) topic-button → compact bubble picker */}
       <div className="border-t border-neutral-200 bg-white">
-        <div className="w-full max-w-3xl mx-auto px-4 py-4 flex justify-center">
-          <AudioRecorder onRecordingComplete={handleRecordingComplete} disabled={isProcessing} />
+        <div className="w-full max-w-3xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-center gap-3">
+            <AudioRecorder
+              onRecordingComplete={handleRecordingComplete}
+              disabled={isProcessing || pickingTopic !== null}
+            />
+            {isEmpty && (
+              <div className="relative">
+                <button
+                  onClick={() => setTopicPickerOpen((v) => !v)}
+                  disabled={pickingTopic !== null}
+                  className="text-sm text-neutral-600 hover:text-neutral-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-neutral-200 hover:border-neutral-400"
+                >
+                  <span>Thema</span>
+                  <span aria-hidden="true" className="text-xs">
+                    {topicPickerOpen ? "▾" : "▴"}
+                  </span>
+                </button>
+
+                {/* Speech-bubble picker anchored to the Thema button. The
+                    tail is drawn with two stacked triangles (outer = border
+                    colour, inner = bg) so the border shows through. */}
+                {topicPickerOpen && (
+                  <div
+                    className="absolute bottom-full right-0 mb-3 z-20 w-72 rounded-xl border border-neutral-200 bg-white shadow-lg p-3"
+                    role="dialog"
+                    aria-label="Themen-Empfehlungen"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] uppercase tracking-wider text-neutral-400">
+                        Themen
+                      </p>
+                      <button
+                        onClick={handleReroll}
+                        disabled={topics === null || rerolling}
+                        className="text-[11px] text-neutral-500 hover:text-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {rerolling ? "…" : "Re-roll"}
+                      </button>
+                    </div>
+                    {topics === null ? (
+                      <p className="text-xs text-neutral-400 py-2 text-center">Lade…</p>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {topics.slice(0, 9).map((t) => (
+                          <button
+                            key={t.target}
+                            onClick={() => handleTopicPick(t)}
+                            disabled={pickingTopic !== null || rerolling}
+                            title={t.target}
+                            className="aspect-square rounded-md border border-neutral-200 bg-white hover:border-neutral-400 hover:bg-neutral-50 transition-colors text-[10px] leading-tight text-neutral-700 px-1.5 py-1 flex items-center justify-center text-center disabled:opacity-40 disabled:cursor-not-allowed line-clamp-4"
+                          >
+                            {t.target}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {topicsError && (
+                      <p className="mt-2 text-[10px] text-red-500">{topicsError}</p>
+                    )}
+                    {pickingTopic && (
+                      <p className="mt-2 text-[10px] text-neutral-400 truncate">
+                        Starte Chat…
+                      </p>
+                    )}
+
+                    {/* Tail: 8px triangle, outline + inner fill so it
+                        matches the bubble's border. Positioned right-side
+                        to point at the Thema button below. */}
+                    <span
+                      aria-hidden="true"
+                      className="absolute -bottom-[7px] right-6 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-neutral-200"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="absolute -bottom-[6px] right-6 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-white"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </main>

@@ -3,7 +3,6 @@ import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { getDb } from "@/lib/db";
 import { generateExplanation } from "@/lib/vocabExplain";
-import { DEFAULT_TARGET } from "@/lib/targetLanguage";
 
 /**
  * Returns the row's native-language translation + hint. Cache-aware:
@@ -32,7 +31,7 @@ export async function POST(req: NextRequest) {
   const db = getDb();
   const row = db
     .prepare(
-      `SELECT id, target_word_original, english_description,
+      `SELECT id, target_word_original, context_sentence,
               native_translation, native_hint
        FROM user_vocab WHERE id = ? AND user_id = ?`,
     )
@@ -40,7 +39,7 @@ export async function POST(req: NextRequest) {
     | {
         id: number;
         target_word_original: string;
-        english_description: string;
+        context_sentence: string | null;
         native_translation: string | null;
         native_hint: string | null;
       }
@@ -61,8 +60,8 @@ export async function POST(req: NextRequest) {
   try {
     const result = await generateExplanation({
       target_word: row.target_word_original,
-      english_description: row.english_description,
-      target_language: DEFAULT_TARGET.language,
+      context_sentence: row.context_sentence ?? "",
+      targetLanguage: user.targetLanguage,
       native_language: user.nativeLanguage,
     });
     db.prepare(

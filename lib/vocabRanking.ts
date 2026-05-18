@@ -22,7 +22,7 @@
 
 import { chatJSON } from "./llm";
 import { getDb } from "./db";
-import { DEFAULT_TARGET } from "./targetLanguage";
+import { getUserById } from "./users";
 
 const BULK_SORT_THRESHOLD = 15;
 
@@ -39,6 +39,9 @@ interface VocabRow {
  */
 export async function rerankAfterInsert(userId: number, newRowId: number): Promise<void> {
   const db = getDb();
+  const user = getUserById(userId);
+  if (!user) return;
+  const targetName = user.targetLanguage.language;
   const allRows = db
     .prepare(
       `SELECT id, target_word_original, english_description, relevance_rank
@@ -51,12 +54,12 @@ export async function rerankAfterInsert(userId: number, newRowId: number): Promi
   if (allRows.length === 0) return;
 
   if (allRows.length <= BULK_SORT_THRESHOLD) {
-    await bulkSortAll(userId, allRows);
+    await bulkSortAll(userId, allRows, targetName);
   } else {
     const newRow = allRows.find((r) => r.id === newRowId);
     if (!newRow) return;
     const others = allRows.filter((r) => r.id !== newRowId);
-    const insertionRank = await binaryInsert(newRow, others);
+    const insertionRank = await binaryInsert(newRow, others, targetName);
     applyBinaryInsert(userId, newRowId, insertionRank);
   }
 }
@@ -65,9 +68,8 @@ export async function rerankAfterInsert(userId: number, newRowId: number): Promi
 // Bulk sort
 // ─────────────────────────────────────────────────────────────────────────
 
-async function bulkSortAll(userId: number, rows: VocabRow[]): Promise<void> {
+async function bulkSortAll(userId: number, rows: VocabRow[], targetName: string): Promise<void> {
   const items = rows.map((r) => formatItem(r));
-  const targetName = DEFAULT_TARGET.language;
   const prompt = `You are sorting a learner's ${targetName} vocabulary list by importance for mastering ${targetName}.
 
 Importance criterion: how fundamental and frequent the word (or phrase) is in everyday ${targetName}. Most important first (high-frequency core vocabulary that any ${targetName} learner needs early), least important last (rare, specialised, niche).
@@ -146,7 +148,7 @@ Rules:
 
 type AnchorPosition = "before_A" | "between_AB" | "between_BC" | "after_C";
 
-async function binaryInsert(newRow: VocabRow, sorted: VocabRow[]): Promise<number> {
+async function binaryInsert(newRow: VocabRow, sorted: VocabRow[], targetName: string): Promise<number> {
   // sorted is the existing list (without newRow), in importance order.
   // Returns the insertion position 0..sorted.length.
   let lo = 0;
@@ -158,7 +160,7 @@ async function binaryInsert(newRow: VocabRow, sorted: VocabRow[]): Promise<numbe
     const bIdx = lo + Math.floor(range / 2);
     const cIdx = lo + Math.floor((range * 3) / 4);
     if (aIdx >= bIdx || bIdx >= cIdx) break; // degenerate range
-    const position = await compareToAnchors(newRow, sorted[aIdx], sorted[bIdx], sorted[cIdx]);
+    const position = await compareToAnchors(newRow, sorted[aIdx], sorted[bIdx], sorted[cIdx], targetName);
     switch (position) {
       case "before_A":
         hi = aIdx;
@@ -186,8 +188,8 @@ async function compareToAnchors(
   a: VocabRow,
   b: VocabRow,
   c: VocabRow,
+  targetName: string,
 ): Promise<AnchorPosition> {
-  const targetName = DEFAULT_TARGET.language;
   const prompt = `You are placing a new ${targetName} vocabulary item into an importance-sorted list.
 
 Importance criterion: how fundamental and frequent the word (or phrase) is in everyday ${targetName}. Most important first.

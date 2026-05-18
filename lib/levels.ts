@@ -257,12 +257,60 @@ export function describeLevelScaleCompact(): string {
 }
 
 /**
+ * Style directive for the AI's outgoing message, scaled by learner
+ * level. The frame is SIMPLICITY, not raw word count — a beginner can
+ * understand a longer reply made of common words faster than a short
+ * one packed with rare vocabulary. The directive relaxes as the
+ * learner advances. This is the authoritative source for reply style;
+ * converse prompts defer to it instead of imposing their own length
+ * caps.
+ */
+function lengthDirectiveForLevel(level: number): string {
+  if (level <= 15) {
+    return [
+      `STYLE GUIDANCE — the learner is in the early stages of learning the language:`,
+      `- Keep your reply SIMPLE. Use common, everyday words the learner is likely to already know.`,
+      `- Don't overwhelm with vocabulary they probably haven't seen — no rare idioms, no compound tenses, no specialised terms.`,
+      `- You don't have to be terse — just simple. Stay relaxed; short or medium length is both fine as long as the words stay easy.`,
+      `- Single-clause sentences usually work best. Build complexity slowly across many turns, not in one turn.`,
+    ].join("\n");
+  }
+  if (level <= 30) {
+    return [
+      `STYLE GUIDANCE — the learner is still consolidating basics:`,
+      `- Keep your reply clear and approachable. Common vocabulary, one or two sentences typically.`,
+      `- Avoid rare idioms, compound tenses, or specialised vocabulary unless the learner introduced them first.`,
+    ].join("\n");
+  }
+  if (level <= 50) {
+    return [
+      `STYLE GUIDANCE:`,
+      `- Conversational, never a lecture. Usually 1–2 sentences; up to 3 if the moment calls for it.`,
+      `- Idioms and richer connectors are fine; the learner can handle them.`,
+    ].join("\n");
+  }
+  return [
+    `STYLE GUIDANCE:`,
+    `- Conversational. Length as the moment calls for; no artificial brevity but no monologues either.`,
+  ].join("\n");
+}
+
+/**
  * Renders the learner's level as a compact, prompt-ready block —
  * level number + CEFR anchor + abilities + concrete examples + a
- * "aim slightly above this" instruction. Used in chat prompts where
- * the AI message should target the learner's complexity ceiling.
+ * length directive + a "aim slightly above this" instruction. Used
+ * in chat prompts where the AI message should target the learner's
+ * complexity ceiling.
+ *
+ * targetLanguage is accepted for forward-compat with per-language
+ * level ranges (Phase 2). Today the ranges are Spanish-specific;
+ * Phase 2 will pick the right table based on this argument.
  */
-export function describeLevelForPrompt(level: number): string {
+export function describeLevelForPrompt(
+  level: number,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  targetLanguage: import("./targetLanguage").TargetLanguageSpec,
+): string {
   const r = getLevelRange(level);
   const targetCeiling = Math.min(100, r.max + 5);
   return [
@@ -270,5 +318,7 @@ export function describeLevelForPrompt(level: number): string {
     r.description,
     `Examples at this level: ${r.examples.map((e) => `"${e}"`).join("; ")}.`,
     `Aim slightly above this level — stretch the learner while staying understandable. Stay within ~${targetCeiling} on the 100-point scale.`,
+    "",
+    lengthDirectiveForLevel(level),
   ].join("\n");
 }

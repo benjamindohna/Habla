@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "sentence, word, wordIndex required" }, { status: 400 });
   }
 
-  const baseArgs = { sentence, word, wordIndex, nativeLanguage: user.nativeLanguage };
+  const baseArgs = { sentence, word, wordIndex, nativeLanguage: user.nativeLanguage, targetLanguage: user.targetLanguage };
 
   try {
     const startPrecise = performance.now();

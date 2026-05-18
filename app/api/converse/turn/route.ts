@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { chatText, type ChatMessage } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
-import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
+import { describeTargetLanguage } from "@/lib/targetLanguage";
 import { describeLevelForPrompt } from "@/lib/levels";
 import {
   appendMessage,
+  deriveConversationTopic,
   getConversation,
   getMessages,
+  updateConversationTopic,
 } from "@/lib/conversations";
 import type { Pair } from "@/types/correction";
 
@@ -53,28 +55,49 @@ export async function POST(req: NextRequest) {
     segments: segments ?? null,
   });
 
+  // Topic derivation: if the chat was started topic-less (empty-chat
+  // path) and this is the first user message, fire a tiny LLM call in
+  // parallel with the AI turn so every saved conversation gets a label
+  // for the recent-chats list. Doesn't gate the response.
+  const needsTopic = !conversation.topic || conversation.topic.trim() === "";
+  const topicPromise: Promise<string | null> = needsTopic
+    ? deriveConversationTopic({
+        firstUserMessage: userTextTarget.trim(),
+        targetLanguage: user.targetLanguage.language,
+        nativeLanguage: user.nativeLanguage,
+      }).catch((err) => {
+        console.warn("[converse/turn] topic derivation failed:", err);
+        return null;
+      })
+    : Promise.resolve(null);
+
   // Rebuild the message history for the model. AI sees the corrected
   // target-language text for user turns (not the raw transcript) so it
   // engages with what the user *meant*, not what they accidentally said.
   const history = getMessages(conversationId);
 
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
+  const target = describeTargetLanguage(user.targetLanguage);
+  const targetName = user.targetLanguage.language;
   const nativeLanguage = user.nativeLanguage;
-  const levelBlock = describeLevelForPrompt(user.level);
+  const levelBlock = describeLevelForPrompt(user.level, user.targetLanguage);
 
+  const topicLine = conversation.topic && conversation.topic.trim()
+    ? `Topic of the conversation: "${conversation.topic}"`
+    : `No specific topic was set — engage naturally with whatever the learner brings up.`;
   const systemPrompt = `You are a native ${target} speaker having a casual conversation with a language learner whose native language is ${nativeLanguage}.
 
-Topic of the conversation: "${conversation.topic}"
+${topicLine}
 
 ${levelBlock}
 
 Behave like a real chat partner:
-- Engage with what the learner just said. React, agree, disagree, share your own take, or ask a follow-up question.
-- Keep replies short — usually one to three sentences. Conversational, not a lecture.
+- Engage with what the learner just said. React, agree, disagree, share your own take.
+- ALWAYS end your reply with a question. The conversation must keep moving — never leave the learner without a clear hook to respond to. The question should feel natural (a friend's curiosity, not an interview), and should fit the topic.
+- Follow the STYLE GUIDANCE in the level block above — that is authoritative on how complex your reply may be.
 - Don't quiz the learner or test them. Just talk like a friend would.
 - Don't comment on the learner's language, grammar, vocabulary, or accent. They have a separate correction system handling that. Just respond to the content.
-- Stay in ${target}: use vocabulary, idioms, named entities, and register that fit this variety. Do not drift to other regions or registers.
+- Stay 100% in ${targetName}. Do NOT include ${nativeLanguage} translations, glosses, parentheticals, or word-pairings. The learner sees only your ${targetName} output.
+- Use vocabulary, idioms, named entities, and register that fit ${target}. Do not drift to other regions or registers.
 
 Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no formatting.`;
 
@@ -90,16 +113,24 @@ Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no
   }
 
   try {
-    const text = (
-      await chatText({
-        task: "chat_light",
+    // Fire AI turn and topic derivation in parallel — both depend only
+    // on the just-appended user message, so neither needs to wait for
+    // the other. Total latency = max(turn, topic) ≈ turn, since the
+    // topic call is much smaller.
+    const [text, derivedTopic] = await Promise.all([
+      chatText({
+        task: "chat_precise",
         label: "converse/turn",
         messages,
         temperature: 0.7,
-      })
-    ).trim();
+      }).then((s) => s.trim()),
+      topicPromise,
+    ]);
     if (!text) {
       throw new Error("Model returned no usable reply");
+    }
+    if (derivedTopic && needsTopic) {
+      updateConversationTopic(conversationId, derivedTopic);
     }
 
     appendMessage({
@@ -109,7 +140,10 @@ Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no
       segments: null,
     });
 
-    return NextResponse.json({ text });
+    return NextResponse.json({
+      text,
+      ...(derivedTopic && needsTopic ? { derivedTopic } : {}),
+    });
   } catch (err) {
     console.error("[/api/converse/turn]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

@@ -17,13 +17,12 @@ import { getDb } from "../lib/db";
 import { generateExplanation } from "../lib/vocabExplain";
 import { generateTts } from "../lib/vocabTts";
 import { getUserById } from "../lib/users";
-import { DEFAULT_TARGET } from "../lib/targetLanguage";
 
 interface Row {
   id: number;
   user_id: number;
   target_word_original: string;
-  english_description: string;
+  context_sentence: string | null;
   native_translation: string | null;
   native_hint: string | null;
   tts_audio: Buffer | null;
@@ -49,8 +48,8 @@ async function backfillRow(row: Row): Promise<{ id: number; explainOk: boolean; 
         try {
           const res = await generateExplanation({
             target_word: row.target_word_original,
-            english_description: row.english_description,
-            target_language: DEFAULT_TARGET.language,
+            context_sentence: row.context_sentence ?? "",
+            targetLanguage: user.targetLanguage,
             native_language: user.nativeLanguage,
           });
           getDb()
@@ -91,7 +90,7 @@ async function main() {
   const db = getDb();
   const rows = db
     .prepare(
-      `SELECT id, user_id, target_word_original, english_description,
+      `SELECT id, user_id, target_word_original, context_sentence,
               native_translation, native_hint, tts_audio
        FROM user_vocab
        WHERE native_translation IS NULL

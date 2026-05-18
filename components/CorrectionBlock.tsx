@@ -3,6 +3,11 @@
 import { useState, useEffect, useRef, Fragment } from "react";
 import type { CorrectionResult, Pair } from "@/types/correction";
 
+interface FollowupTurn {
+  question: string;
+  answer: string;
+}
+
 interface CorrectionBlockProps {
   result: CorrectionResult;
   nativeLanguage: string;
@@ -31,6 +36,15 @@ export default function CorrectionBlock({
   const [loading, setLoading] = useState(false);
   const [cache, setCache] = useState<Record<number, string>>({});
 
+  // Follow-up Q&A per segment. Each index keeps its own conversation
+  // history while the user toggles between segments. Cleared whenever
+  // a new result arrives. Ephemeral by design — not persisted to DB.
+  const [followups, setFollowups] = useState<Record<number, FollowupTurn[]>>({});
+  const [followupInput, setFollowupInput] = useState("");
+  const [followupLoading, setFollowupLoading] = useState(false);
+  const [followupError, setFollowupError] = useState<string | null>(null);
+  const followupInputRef = useRef<HTMLInputElement | null>(null);
+
   const [ttsLoading, setTtsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playCount, setPlayCount] = useState(0);
@@ -46,6 +60,10 @@ export default function CorrectionBlock({
     setSelectedIndex(null);
     setSelectedPair(null);
     setExplanation(null);
+    setFollowups({});
+    setFollowupInput("");
+    setFollowupLoading(false);
+    setFollowupError(null);
     setPlayCount(0);
     setIsPlaying(false);
     blobCacheRef.current = {};
@@ -112,16 +130,28 @@ export default function CorrectionBlock({
   async function handlePairClick(pair: Pair, index: number) {
     if (pair.is_match) return;
 
-    // Toggle off if already selected
+    // Toggle off if already selected — clears the per-segment ephemeral
+    // history too, matching the "follow-ups die when the segment is
+    // closed" rule.
     if (selectedIndex === index) {
       setSelectedIndex(null);
       setSelectedPair(null);
       setExplanation(null);
+      setFollowupInput("");
+      setFollowupError(null);
+      setFollowups((prev) => {
+        if (!(index in prev)) return prev;
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      });
       return;
     }
 
     setSelectedIndex(index);
     setSelectedPair(pair);
+    setFollowupInput("");
+    setFollowupError(null);
 
     // Serve from cache if already fetched
     if (cache[index] !== undefined) {
@@ -153,6 +183,57 @@ export default function CorrectionBlock({
       setExplanation("Could not load explanation.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleFollowupSend() {
+    if (followupLoading) return;
+    if (selectedIndex === null || !selectedPair) return;
+    const question = followupInput.trim();
+    if (!question) return;
+    const baseExplanation = cache[selectedIndex] ?? explanation;
+    if (!baseExplanation) return;
+
+    const priorTurns = followups[selectedIndex] ?? [];
+    const history = priorTurns.flatMap((t) => [
+      { role: "user" as const, content: t.question },
+      { role: "assistant" as const, content: t.answer },
+    ]);
+
+    setFollowupInput("");
+    setFollowupError(null);
+    setFollowupLoading(true);
+    try {
+      const res = await fetch("/api/explain/followup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          localVersionTarget: result.local_version_target,
+          localSegment: selectedPair.local_segment,
+          userSegment: selectedPair.user_segment,
+          initialExplanation: baseExplanation,
+          history,
+          question,
+          nativeLanguage,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { answer?: string };
+      const answer = data.answer?.trim();
+      if (!answer) throw new Error("Empty answer");
+      setFollowups((prev) => ({
+        ...prev,
+        [selectedIndex]: [...(prev[selectedIndex] ?? []), { question, answer }],
+      }));
+    } catch (err) {
+      console.error("[followup]", err);
+      setFollowupError((err as Error).message || "Konnte Antwort nicht laden");
+      // Put the user's draft back so they can retry without retyping.
+      setFollowupInput(question);
+    } finally {
+      setFollowupLoading(false);
+      // Refocus the input for fast follow-up Q&A.
+      setTimeout(() => followupInputRef.current?.focus(), 0);
     }
   }
 
@@ -286,6 +367,58 @@ export default function CorrectionBlock({
               <FormattedText text={explanation} />
             ) : null}
           </div>
+
+          {/* Follow-up Q&A — shown only once the initial explanation is on screen */}
+          {selectedIndex !== null && explanation && !loading && (
+            <div className="border-t border-neutral-100 px-5 py-3 bg-neutral-50">
+              {(followups[selectedIndex] ?? []).map((turn, i) => (
+                <div key={i} className="mb-3 space-y-1.5">
+                  <p className="text-xs text-neutral-500 leading-snug">
+                    <span className="font-medium text-neutral-600">Du:</span> {turn.question}
+                  </p>
+                  <div className="text-sm text-neutral-700 pl-3 border-l-2 border-neutral-200">
+                    <FormattedText text={turn.answer} />
+                  </div>
+                </div>
+              ))}
+
+              {followupLoading && (
+                <p className="flex items-center gap-2 text-xs text-neutral-400 mb-2">
+                  <span className="w-3 h-3 rounded-full border-2 border-neutral-300 border-t-neutral-600 animate-spin" />
+                  Antwort wird geladen…
+                </p>
+              )}
+
+              <div className="flex gap-2 items-center mt-1">
+                <input
+                  ref={followupInputRef}
+                  type="text"
+                  value={followupInput}
+                  onChange={(e) => setFollowupInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleFollowupSend();
+                    }
+                  }}
+                  disabled={followupLoading}
+                  placeholder="Folgefrage zur Grammatik…"
+                  className="flex-1 min-w-0 h-9 px-3 rounded-lg border border-neutral-200 bg-white text-sm text-neutral-900 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none disabled:opacity-50"
+                />
+                <button
+                  onClick={handleFollowupSend}
+                  disabled={followupLoading || !followupInput.trim()}
+                  className="shrink-0 h-9 px-3 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Senden
+                </button>
+              </div>
+
+              {followupError && (
+                <p className="mt-1.5 text-xs text-rose-500">{followupError}</p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

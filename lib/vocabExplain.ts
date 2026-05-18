@@ -5,14 +5,20 @@
 //   - scripts/backfillVocabAssets.ts (one-shot for legacy rows)
 
 import { chatJSON } from "./llm";
+import type { TargetLanguageSpec } from "./targetLanguage";
 
 export interface ExplainArgs {
   /** Target word as shown on the card (preserves casing / form). */
   target_word: string;
-  /** The English sense-key for the row. */
-  english_description: string;
-  /** e.g. "Spanish". */
-  target_language: string;
+  /** The sentence the word was tapped in. Used ONLY for sense
+   *  disambiguation when the word is polysemous — never to colour the
+   *  translation with topical context. Translation is decoupled from
+   *  english_description so a mis-aimed description can't cascade into
+   *  the translation; both fields are grown independently from
+   *  word + context. */
+  context_sentence: string;
+  /** The learner's target-language spec — threaded from the session user. */
+  targetLanguage: TargetLanguageSpec;
   /** e.g. "German". */
   native_language: string;
 }
@@ -32,7 +38,7 @@ export interface Explanation {
  * (LLM hallucination guard). Hint may be empty (still usable).
  */
 export async function generateExplanation(args: ExplainArgs): Promise<Explanation> {
-  const prompt = `You are a vocabulary tutor. The learner is studying ${args.target_language}; their native language is ${args.native_language}.
+  const prompt = `You are a vocabulary tutor. The learner is studying ${args.targetLanguage.language}; their native language is ${args.native_language}.
 
 The learner couldn't recall this word. Give a clear, structurally-faithful answer plus a short memory aid.
 
@@ -43,21 +49,29 @@ The TRANSLATION must be the natural ${args.native_language} equivalent that mirr
 - Idiom / fixed expression → idiomatic ${args.native_language} equivalent (or close paraphrase if no exact idiom exists).
 - Adjective / adverb / function word → plain natural form.
 
+CRITICAL — translate the WORD'S CORE MEANING, not the context's flavour. The sentence is given ONLY for sense disambiguation when the word is polysemous (e.g. "banco" can be financial or bench — the context picks one). For monosemic words, IGNORE the context entirely; do not let topical nouns from the sentence ("birds", "ocean", "game", "teammates") leak into your translation or hint. Litmus test: imagine the same word used in a different context tomorrow — would your translation still apply? If no, you've over-specified.
+
 Worked examples (target Spanish, native German — illustrative, the same logic applies to any pair):
 - "casa"                → translation: "das Haus", hint: "Ein Gebäude, in dem man wohnt."
 - "comer"               → translation: "essen", hint: "Mahlzeiten zu sich nehmen."
 - "comió"               → translation: "(er/sie) aß / hat gegessen", hint: "Vergangenheit von essen."
-- "banco" (financial)   → translation: "die Bank (Geldinstitut)", hint: "Wo man Geld einzahlt oder abhebt."
-- "banco" (bench)       → translation: "die Sitzbank", hint: "Eine lange Bank, auf der man im Park sitzt."
+- "banco" in "Voy al banco a sacar dinero." → translation: "die Bank (Geldinstitut)", hint: "Wo man Geld einzahlt oder abhebt."
+- "banco" in "Me senté en el banco del parque." → translation: "die Sitzbank", hint: "Eine lange Bank, auf der man im Park sitzt."
 - "te haya impresionado" → translation: "(es) hat dich beeindruckt (Konjunktiv Perfekt)", hint: "Form nach „que" oder „ojalá", drückt Unsicherheit aus."
 - "darse cuenta"        → translation: "merken / bemerken (reflexiv)", hint: "Etwas plötzlich verstehen oder feststellen."
 - "echar de menos"      → translation: "vermissen", hint: "Jemanden oder etwas Abwesendes vermissen."
 - "voy a hacer"         → translation: "ich werde machen / ich gehe machen (nahe Zukunft)", hint: "Ankündigung einer baldigen Handlung."
 
-Word: "${args.target_word}"
-Sense being tested (in English): "${args.english_description}"
+Anti-examples — these are CONTEXT-LEAK failures. The bad version pulls vocabulary from the surrounding clause into the translation; the good version stays at the word's lexical level:
+- "canto" in "el canto de los pájaros"     → ❌ "der Gesang der Vögel"      ✅ "der Gesang"
+- "olas" in "las olas chocaban con la playa" → ❌ "die Meereswellen"          ✅ "die Wellen"
+- "buceo" in "fuimos a hacer buceo en Tailandia" → ❌ "das Sporttauchen"     ✅ "das Tauchen"
+- "encontrar" in "no podía encontrar a sus compañeros" → ❌ "Mitspieler finden" ✅ "finden"
+- "estilo" in "su estilo de juego es ofensivo" → ❌ "Spielstil" ✅ "der Stil"
+- "toque" in "un toque sutil del defensa" → ❌ "geschickter Spielzug" ✅ "die Berührung"
 
-If the Word and the Sense seem to disagree (e.g. the Sense omits a clitic that the Word clearly carries), trust the Word — describe what the Word actually says.
+Word: "${args.target_word}"
+Context where the word appears: "${args.context_sentence}"
 
 Return ONLY valid JSON:
 {
@@ -66,10 +80,10 @@ Return ONLY valid JSON:
 }`;
 
   const result = await chatJSON<{ translation?: string; hint?: string }>({
-    task: "chat_light",
+    task: "chat_precise",
     label: "vocab/explain",
     systemPrompt: prompt,
-    temperature: 0.3,
+    temperature: 0,
   });
   const translation = (result.translation ?? "").trim();
   const hint = (result.hint ?? "").trim();

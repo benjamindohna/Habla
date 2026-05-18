@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { getDb } from "@/lib/db";
-import { judgeVocabSentence } from "@/lib/vocabSentenceJudge";
-import { DEFAULT_TARGET } from "@/lib/targetLanguage";
+import { judgeVocabSentence, explainSentenceMistake } from "@/lib/vocabSentenceJudge";
 
 /**
  * Production-mode judge endpoint. The learner has typed a sentence
@@ -37,27 +36,52 @@ export async function POST(req: NextRequest) {
 
   const row = getDb()
     .prepare(
-      `SELECT id, target_word_original, english_description
+      `SELECT id, target_word_original, english_description, native_translation
        FROM user_vocab WHERE id = ? AND user_id = ?`,
     )
     .get(rowId, session.userId) as
-    | { id: number; target_word_original: string; english_description: string }
+    | {
+        id: number;
+        target_word_original: string;
+        english_description: string;
+        native_translation: string | null;
+      }
     | undefined;
   if (!row) {
     return NextResponse.json({ error: "Card not found" }, { status: 404 });
   }
 
+  const trimmedSentence = userSentence.trim();
+
   try {
     const verdict = await judgeVocabSentence({
       target_word: row.target_word_original,
       tested_description: row.english_description,
-      user_sentence: userSentence.trim(),
-      target_language: DEFAULT_TARGET.language,
+      user_sentence: trimmedSentence,
+      targetLanguage: user.targetLanguage,
       native_language: user.nativeLanguage,
     });
+
+    let mistakeHint: string | null = null;
+    if (verdict === "0") {
+      try {
+        mistakeHint = await explainSentenceMistake({
+          target_word: row.target_word_original,
+          tested_description: row.english_description,
+          native_translation: row.native_translation ?? "",
+          user_sentence: trimmedSentence,
+          targetLanguage: user.targetLanguage,
+          native_language: user.nativeLanguage,
+        });
+      } catch (err) {
+        console.error("[/api/vocab/judge-sentence] mistake-hint", err);
+      }
+    }
+
     return NextResponse.json({
       result: verdict,
       english_description: row.english_description,
+      mistake_hint: mistakeHint,
     });
   } catch (err) {
     console.error("[/api/vocab/judge-sentence]", err);

@@ -2,11 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import TopicGrid, { type Topic } from "@/components/TopicGrid";
-
-interface TopicWithKind extends Topic {
-  kind: "match" | "related" | "random";
-}
 
 type CorrectionStyle = "natural" | "transcript_aware";
 
@@ -20,19 +15,34 @@ interface Me {
   correctionStyle: CorrectionStyle;
 }
 
+interface RecentConversation {
+  id: number;
+  topic: string;
+  lastActivity: number;
+  messageCount: number;
+}
+
+const RECENT_LIMIT = 5;
+
+function relativeTime(unixSeconds: number): string {
+  const diff = Math.floor(Date.now() / 1000) - unixSeconds;
+  if (diff < 60) return "gerade eben";
+  if (diff < 3600) return `vor ${Math.floor(diff / 60)} Min.`;
+  if (diff < 86400) return `vor ${Math.floor(diff / 3600)} Std.`;
+  const days = Math.floor(diff / 86400);
+  if (days < 7) return `vor ${days} Tag${days === 1 ? "" : "en"}`;
+  return new Date(unixSeconds * 1000).toLocaleDateString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+  });
+}
+
 export default function Page() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
-  // True while we're starting a new conversation (post tile-tap, awaiting
-  // /api/converse/start, before navigation to /chat/[id]).
-  const [starting, setStarting] = useState<string | null>(null);
-  // Toggle for the level-info modal (the small "?" badge next to the level).
+  const [starting, setStarting] = useState(false);
+  const [recents, setRecents] = useState<RecentConversation[] | null>(null);
   const [showLevelInfo, setShowLevelInfo] = useState(false);
-
-  // Topics for the home grid. null = loading; [] = error fetching first set.
-  const [topics, setTopics] = useState<TopicWithKind[] | null>(null);
-  const [topicsError, setTopicsError] = useState<string | null>(null);
-  const [rerolling, setRerolling] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,42 +59,21 @@ export default function Page() {
     };
   }, [router]);
 
-  // Fetch the current set on mount. Should be instant if `npm run warm` was
-  // run; otherwise the endpoint generates lazily and waits.
   useEffect(() => {
-    if (!me || topics !== null) return;
+    if (!me) return;
     let cancelled = false;
-    fetch("/api/topics/current")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load topics"))))
-      .then((data: { topics: TopicWithKind[] }) => {
-        if (!cancelled) setTopics(data.topics);
+    fetch(`/api/conversations/recent?limit=${RECENT_LIMIT}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load recent chats"))))
+      .then((data: { conversations: RecentConversation[] }) => {
+        if (!cancelled) setRecents(data.conversations);
       })
-      .catch((err: Error) => {
-        if (!cancelled) {
-          setTopics([]);
-          setTopicsError(err.message);
-        }
+      .catch(() => {
+        if (!cancelled) setRecents([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [me, topics]);
-
-  async function handleReroll() {
-    if (rerolling) return;
-    setRerolling(true);
-    setTopicsError(null);
-    try {
-      const res = await fetch("/api/topics/reroll", { method: "POST" });
-      if (!res.ok) throw new Error("Re-roll failed");
-      const data = (await res.json()) as { topics: TopicWithKind[] };
-      setTopics(data.topics);
-    } catch (err) {
-      setTopicsError((err as Error).message);
-    } finally {
-      setRerolling(false);
-    }
-  }
+  }, [me]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -93,7 +82,6 @@ export default function Page() {
 
   async function handleStyleChange(style: CorrectionStyle) {
     if (!me || me.correctionStyle === style) return;
-    // Optimistic update — revert if the server rejects.
     const previous = me.correctionStyle;
     setMe({ ...me, correctionStyle: style });
     try {
@@ -108,33 +96,20 @@ export default function Page() {
     }
   }
 
-  async function enterChat(topic: Topic) {
+  async function handleStartChat() {
     if (starting) return;
-    setStarting(topic.target);
-    // Fire-and-forget: record the tap so future topic generations drift toward
-    // what the user actually engages with. Failure is non-blocking.
-    fetch("/api/me/interests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ interest: topic.target }),
-    }).catch(() => {});
-
+    setStarting(true);
     try {
-      const res = await fetch("/api/converse/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: topic.target }),
-      });
+      const res = await fetch("/api/converse/create-empty", { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { conversationId: number; text: string };
+      const data = (await res.json()) as { conversationId: number };
       router.push(`/chat/${data.conversationId}`);
     } catch (err) {
-      console.error("[enterChat]", err);
-      setStarting(null);
+      console.error("[handleStartChat]", err);
+      setStarting(false);
     }
   }
 
-  // ── Loading ─────────────────────────────────────────────────────────────
   if (!me) {
     return (
       <main className="flex min-h-screen items-center justify-center">
@@ -143,8 +118,6 @@ export default function Page() {
     );
   }
 
-  // ── Home ────────────────────────────────────────────────────────────────
-  const showLoading = topics === null;
   return (
     <main className="flex min-h-screen flex-col items-center px-4 py-8">
       <div className="w-full max-w-xl flex items-center justify-between mb-12">
@@ -171,18 +144,6 @@ export default function Page() {
             </button>
           </div>
           <button
-            onClick={() => router.push("/vocab/practice")}
-            className="text-xs text-neutral-500 hover:text-neutral-800 transition-colors"
-          >
-            Übersetzen →
-          </button>
-          <button
-            onClick={() => router.push("/vocab/sentence")}
-            className="text-xs text-neutral-500 hover:text-neutral-800 transition-colors"
-          >
-            Anwenden →
-          </button>
-          <button
             onClick={handleLogout}
             className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
           >
@@ -200,13 +161,11 @@ export default function Page() {
             className="max-w-md w-full bg-white rounded-2xl shadow-xl p-6 space-y-3"
             onClick={(e) => e.stopPropagation()}
           >
-            <p className="text-sm font-medium text-neutral-800">
-              Wie funktioniert das Level?
-            </p>
+            <p className="text-sm font-medium text-neutral-800">Wie funktioniert das Level?</p>
             <p className="text-sm text-neutral-600 leading-relaxed">
-              Alle 24 Stunden sieht sich ein vertraulicher Algorithmus deine letzten Chat-Aufnahmen
-              an und entscheidet, ob du Fortschritte machst oder ob dein Level lieber einen
-              Schritt heruntergesetzt werden soll.
+              Alle 24 Stunden sieht sich ein vertraulicher Algorithmus deine letzten Chat-Aufnahmen an
+              und entscheidet, ob du Fortschritte machst oder ob dein Level lieber einen Schritt
+              heruntergesetzt werden soll.
             </p>
             <div className="flex justify-end">
               <button
@@ -220,26 +179,44 @@ export default function Page() {
         </div>
       )}
 
-      <div className="w-full max-w-xl flex flex-col items-center gap-8 flex-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-center">
-          Hola, ¿de qué quieres hablar hoy?
-        </h1>
-
-        <TopicGrid topics={topics ?? []} onSelect={enterChat} disabled={showLoading || rerolling || starting !== null} />
-
-        {topicsError && <p className="text-xs text-red-500">{topicsError}</p>}
-        {starting !== null && (
-          <p className="text-xs text-neutral-400">Starting chat about &ldquo;{starting}&rdquo;…</p>
-        )}
-
+      <div className="w-full max-w-md flex flex-col items-stretch gap-3 mt-8">
         <button
-          onClick={handleReroll}
-          disabled={showLoading || rerolling}
-          className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={handleStartChat}
+          disabled={starting}
+          className="w-full px-6 py-5 rounded-2xl bg-neutral-900 text-white text-base font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {showLoading ? "Loading topics…" : rerolling ? "Re-rolling…" : "Re-roll topics"}
+          {starting ? "Starte…" : "Neuen Chat starten"}
+        </button>
+        <button
+          onClick={() => router.push("/vocab")}
+          className="w-full px-6 py-5 rounded-2xl border border-neutral-200 bg-white text-neutral-900 text-base font-medium hover:border-neutral-400 transition-colors"
+        >
+          Vokabeln lernen
         </button>
       </div>
+
+      {recents !== null && recents.length > 0 && (
+        <div className="w-full max-w-md mt-12">
+          <p className="text-xs uppercase tracking-wider text-neutral-400 mb-3">Letzte Chats</p>
+          <ul className="space-y-1">
+            {recents.map((c) => (
+              <li key={c.id}>
+                <button
+                  onClick={() => router.push(`/chat/${c.id}`)}
+                  className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg hover:bg-neutral-100 transition-colors text-left"
+                >
+                  <span className="text-sm text-neutral-800 truncate">
+                    {c.topic || "Freies Gespräch"}
+                  </span>
+                  <span className="text-xs text-neutral-400 shrink-0 tabular-nums">
+                    {relativeTime(c.lastActivity)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </main>
   );
 }

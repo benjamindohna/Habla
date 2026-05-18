@@ -13,6 +13,7 @@
 
 import { chatText } from "./llm";
 import { markWordOccurrence } from "./aiBubblePipeline";
+import type { TargetLanguageSpec } from "./targetLanguage";
 
 /**
  * Standard normalisation. Always applied as the very first pass. Steps:
@@ -67,7 +68,7 @@ export interface DescribeWordArgs {
    *  type the segment and context manually with no index. */
   tapped_word_index?: number;
   /** e.g. "Spanish". */
-  target_language: string;
+  targetLanguage: TargetLanguageSpec;
   /** e.g. "German". Used as a frame-setting hint, not as a translation
    *  reference — the description is in English regardless. */
   native_language: string;
@@ -89,7 +90,7 @@ export async function generateVocabDescription(args: DescribeWordArgs): Promise<
       ? markWordOccurrence(args.context_sentence, args.tapped_word_index)
       : args.context_sentence;
 
-  const prompt = `You are generating a sense-key for a vocabulary entry. The learner is studying ${args.target_language}; their native language is ${args.native_language}. They have just tapped a word in a ${args.target_language} sentence.
+  const prompt = `You are generating a sense-key for a vocabulary entry. The learner is studying ${args.targetLanguage.language}; their native language is ${args.native_language}. They have just tapped a word in a ${args.targetLanguage.language} sentence.
 
 Write a SHORT English description (3-7 words) of the SPECIFIC SENSE the tapped word has in this sentence. The description is used as a sense-key: it must be precise enough that two genuinely different meanings of the same word produce noticeably different descriptions, but generic enough that two synonymous translations of the same meaning produce IDENTICAL descriptions.
 
@@ -98,7 +99,9 @@ Rules:
 - Describe the meaning, not the morphological form (no bare "tense / number" labels for single-word lexemes).
 - Be neutral about register / dialect.
 - The context may wrap the tapped word in «guillemets» — that marks exactly which occurrence the learner tapped (the same word may appear multiple times in different senses). Use that marker to disambiguate.
-- Describe the TARGET WORD itself, not the surrounding clause. If the context mentions a topic (a match, a meal, a person), do NOT paraphrase that topic into the description. The description must be about the segment.
+- CRITICAL — capture the WORD'S CORE ESSENCE, not the context's flavour. The description is a sense-key that must work for ANY future use of this word. Strip every topical qualifier the context introduced ("of birds", "in the sea", "as a sport", "for food", "by nature", "in a game", "for teammates", "of the ocean") unless the qualifier is part of the WORD'S actual lexical meaning. Litmus test: imagine the same word used in a completely different context tomorrow — would your description still apply unchanged? If no, it's over-specified and wrong. Default to the SHORTEST description that names the lexical sense.
+- Polysemy splits remain valid: "banco" (bench) vs "banco" (financial institution) are TRUE different senses encoded in the word itself. The forbidden move is shrinking a single sense into a context-narrow phrasing ("song of birds" instead of "song / singing").
+- PARENTHETICALS — only morpho-grammatical tags are allowed: tense, person, mood, voice, aspect, reflexivity, formality. Examples of ALLOWED parens: "(subjunctive perfect)", "(reflexive)", "(simple past, 3rd person)", "(near future)", "(formal)". CONTEXT/TOPIC parens are FORBIDDEN — never emit "(in sports context)", "(in a rural area)", "(catching fish for food)", "(as a sport)", "(of birds)", "(on the beach)", "(about teammates)", "(skillful play)", "(of gameplay)". Decision test before writing a parenthetical: does the parenthetical name a grammatical feature of the word (tense, mood, person)? If yes → keep. Does it name a TOPIC or DOMAIN where this word happens to appear? If yes → DELETE the parenthetical AND any topic words from the main description. Polysemy splits are expressed by writing two genuinely different short phrases ("financial institution" vs "long bench to sit on"), NEVER by appending "(financial)" or "(bench)" tags.
 - For MULTI-WORD target words (compound tenses, idioms, fixed expressions, segments with clitic pronouns), the description must include EVERY semantic component the segment carries. Clitic objects (te, me, lo, la, le, nos, os, los, las, les, se), reflexive markers, particles, and tense/aspect cues are all part of the meaning — never drop them. The description should be reproducible: if you back-translated it into the target language, you should land on the same segment, not a shorter form.
 
 Worked examples:
@@ -109,9 +112,9 @@ Worked examples:
   "hoja" in "la «hoja» se cayó del árbol en otoño"           → "leaf of a plant"
   "hoja" in "necesito una «hoja» de papel"                   → "sheet of paper"
   "hoja" in "la «hoja» del cuchillo está afilada"            → "blade of a cutting tool"
-  "comer" in "vamos a «comer» pasta"                         → "to eat (food, meal)"
-  "Madrid" in "vivo en «Madrid» desde hace cinco años"       → "Madrid (city, capital of Spain)"
-  "Coca-Cola" in "una «Coca-Cola» fría"                      → "Coca-Cola (the soft drink brand)"
+  "comer" in "vamos a «comer» pasta"                         → "to eat"
+  "Madrid" in "vivo en «Madrid» desde hace cinco años"       → "Madrid, capital of Spain"
+  "Coca-Cola" in "una «Coca-Cola» fría"                      → "Coca-Cola, soft drink brand"
   Multi-word segment examples (note: every clitic / particle is preserved):
   "te haya impresionado" in "un partido que te «haya» impresionado" → "has impressed you (subjunctive perfect)"
   "darse cuenta" in "no se «dio» cuenta del error"           → "to realise / become aware (reflexive)"
@@ -119,16 +122,34 @@ Worked examples:
   "se lo dijo" in "ya «se» lo dijo a su madre"               → "told it to him/her (already)"
   "voy a hacer" in "«voy» a hacer la cena"                   → "going to do / make (near future)"
 
+Anti-examples — these are CONTEXT-LEAK failures. The bad version pulls vocabulary from the surrounding clause into the description; the good version stays at the word's lexical level:
+  "canto" in "el «canto» de los pájaros"                     → ❌ "song or call of birds"           ✅ "song / singing / chant"
+  "pesca" in "la «pesca» en el río"                          → ❌ "catching fish for food"           ✅ "fishing"
+  "buceo" in "fuimos a hacer «buceo»"                        → ❌ "underwater diving as a sport"     ✅ "scuba diving / underwater diving"
+  "olas" in "las «olas» chocaban con la playa"               → ❌ "waves in the sea"                 ✅ "waves (of water)"
+  "tranquilidad" in "la «tranquilidad» del océano"           → ❌ "calmness of the ocean"            ✅ "calmness / tranquility"
+  "encontrar" in "no podía «encontrar» a sus compañeros"     → ❌ "to find or locate teammates"      ✅ "to find / locate"
+  "sutil" in "un toque «sutil» del defensa"                  → ❌ "delicate touch in defense"        ✅ "subtle / delicate"
+  "aporta" in "la música «aporta» una sensación de paz"      → ❌ "provides a feeling of peace"      ✅ "to provide / contribute / bring"
+  "sonido" in "el «sonido» del viento"                       → ❌ "sound produced by nature"         ✅ "sound"
+  "juego" in "leer el «juego» del rival"                     → ❌ "game / play (in sports context)"  ✅ "game / play"
+  "pesca" in "salimos de «pesca» temprano en el río"         → ❌ "fishing (catching fish for food)"  ✅ "fishing"
+  "cabaña" in "alquilamos una «cabaña» en la montaña"        → ❌ "small house in a rural area"        ✅ "small house / cabin / hut"
+  "estilo" in "su «estilo» de juego es ofensivo"             → ❌ "style of play / gameplay"          ✅ "style"
+  "toque" in "un «toque» sutil del defensa"                  → ❌ "subtle touch / skillful play"      ✅ "touch / light touch"
+  "le dio" in "le «dio» la libertad de jugar"                → ❌ "to give (someone) freedom to act"  ✅ "gave (simple past, 3rd person)"
+  "comer" in "vamos a «comer» pasta"                         → ❌ "to eat (food, meal)"               ✅ "to eat"
+
 Word: "${args.target_word}"
 Context: "${context}"
 
 Return ONLY the description string. No JSON, no quotes, no explanation.`;
 
   const raw = await chatText({
-    task: "chat_light",
+    task: "chat_precise",
     label: "vocab/describe",
     systemPrompt: prompt,
-    temperature: 0.2,
+    temperature: 0,
   });
 
   // The model occasionally wraps the output in quotes despite the
@@ -170,7 +191,7 @@ export interface JudgeArgs {
   /** The learner's typed/spoken answer in their native language. */
   user_answer: string;
   /** e.g. "Spanish". */
-  target_language: string;
+  targetLanguage: TargetLanguageSpec;
   /** e.g. "German". */
   native_language: string;
 }
@@ -203,10 +224,10 @@ export interface JudgeArgs {
  */
 export async function judgeVocabAnswer(args: JudgeArgs): Promise<VocabJudgement> {
   const prompt = `You are evaluating a vocabulary review answer for a language learner.
-The learner is studying ${args.target_language}; their native language is ${args.native_language}.
+The learner is studying ${args.targetLanguage.language}; their native language is ${args.native_language}.
 
 You receive:
-- A ${args.target_language} word being tested.
+- A ${args.targetLanguage.language} word being tested.
 - The SENSE of this word being tested, described in English.
 - The learner's answer in ${args.native_language}.
 
@@ -229,7 +250,7 @@ Be STRICT on:
 
 Output exactly ONE character, no other text:
 - 1  the answer matches the TESTED sense, OR is ambiguous and could plausibly refer to the tested sense
-- X  the answer UNAMBIGUOUSLY refers to a DIFFERENT sense of "${args.target_word}" — use your own linguistic knowledge of ${args.target_language} to recognise alternative meanings; you are NOT given a list of other known senses. Reserve X for answers that can ONLY mean a different sense, never for answers that could plausibly mean the tested sense.
+- X  the answer UNAMBIGUOUSLY refers to a DIFFERENT sense of "${args.target_word}" — use your own linguistic knowledge of ${args.targetLanguage.language} to recognise alternative meanings; you are NOT given a list of other known senses. Reserve X for answers that can ONLY mean a different sense, never for answers that could plausibly mean the tested sense.
 - 0  the answer is wrong, empty, or just echoes the target word
 
 Examples (illustrative — Spanish target, German native; rules apply to any language pair):

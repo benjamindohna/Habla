@@ -18,7 +18,7 @@
 import { getDb } from "./db";
 import { compareVocabDescriptions, generateVocabDescription, normalizeVocab } from "./vocab";
 import { rerankAfterInsert } from "./vocabRanking";
-import { DEFAULT_TARGET } from "./targetLanguage";
+import type { TargetLanguageSpec } from "./targetLanguage";
 import { generateExplanation } from "./vocabExplain";
 import { generateTts } from "./vocabTts";
 
@@ -37,6 +37,9 @@ export interface SaveVocabArgs {
   /** User's native language (for the description generator's framing
    *  prompt — the description itself is always English). */
   native_language: string;
+  /** User's target language spec. Threaded into description / explain
+   *  prompts so saves work the same for any target-language user. */
+  targetLanguage: TargetLanguageSpec;
 }
 
 export type SaveVocabResult =
@@ -64,7 +67,7 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
     target_word: original,
     context_sentence: args.context_sentence,
     tapped_word_index: args.tapped_word_index,
-    target_language: DEFAULT_TARGET.language,
+    targetLanguage: args.targetLanguage,
     native_language: args.native_language,
   });
 
@@ -91,7 +94,7 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
       .run(args.userId, original, lower, description, args.context_sentence);
     const rowId = Number(result.lastInsertRowid);
     await rerankAfterInsert(args.userId, rowId);
-    generateAssetsAsync(rowId, args.userId, original, description, args.native_language);
+    generateAssetsAsync(rowId, args.userId, original, args.context_sentence, args.native_language, args.targetLanguage);
     return {
       action: "inserted",
       rowId,
@@ -128,7 +131,7 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
     .run(args.userId, original, lower, description, args.context_sentence);
   const rowId = Number(result.lastInsertRowid);
   await rerankAfterInsert(args.userId, rowId);
-  generateAssetsAsync(rowId, args.userId, original, description, args.native_language);
+  generateAssetsAsync(rowId, args.userId, original, args.context_sentence, args.native_language, args.targetLanguage);
   return {
     action: "polysemy_inserted",
     rowId,
@@ -151,14 +154,15 @@ function generateAssetsAsync(
   rowId: number,
   userId: number,
   targetWord: string,
-  englishDescription: string,
+  contextSentence: string,
   nativeLanguage: string,
+  targetLanguage: TargetLanguageSpec,
 ): void {
   void Promise.allSettled([
     generateExplanation({
       target_word: targetWord,
-      english_description: englishDescription,
-      target_language: DEFAULT_TARGET.language,
+      context_sentence: contextSentence,
+      targetLanguage,
       native_language: nativeLanguage,
     }).then((res) => {
       getDb()

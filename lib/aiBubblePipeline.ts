@@ -11,7 +11,7 @@
 //   caching.
 
 import { chatJSON, chatText, type ChatTask } from "./llm";
-import { DEFAULT_TARGET, describeTargetLanguage } from "./targetLanguage";
+import { describeTargetLanguage, type TargetLanguageSpec } from "./targetLanguage";
 import { describeLevelForPrompt } from "./levels";
 
 // ── Shared: Call A — text only ───────────────────────────────────────────
@@ -20,10 +20,11 @@ export async function generateAIOpener(args: {
   topic: string;
   level: number;
   nativeLanguage: string;
+  targetLanguage: TargetLanguageSpec;
 }): Promise<string> {
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
-  const levelBlock = describeLevelForPrompt(args.level);
+  const target = describeTargetLanguage(args.targetLanguage);
+  const targetName = args.targetLanguage.language;
+  const levelBlock = describeLevelForPrompt(args.level, args.targetLanguage);
 
   const prompt = `You are a native ${target} speaker opening a casual conversation about a topic with a learner whose native language is ${args.nativeLanguage}.
 
@@ -104,6 +105,7 @@ export async function translateWordInContext(args: {
   word: string;
   wordIndex: number;
   nativeLanguage: string;
+  targetLanguage: TargetLanguageSpec;
   /** Override the model tier. Defaults to "chat_light" (gpt-4o-mini),
    *  which after manual A/B testing on the playground handles the full
    *  task — segment selection, compound-tense detection, contextual
@@ -113,8 +115,8 @@ export async function translateWordInContext(args: {
    *  (gpt-4o) only if the prompt drifts again on edge cases. */
   task?: ChatTask;
 }): Promise<WordLookupResult> {
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
+  const target = describeTargetLanguage(args.targetLanguage);
+  const targetName = args.targetLanguage.language;
   const marked = markWordOccurrence(args.sentence, args.wordIndex);
   const words = tokenizeWords(args.sentence);
   const indexedWordList = words.map((w, i) => `  [${i}] ${w}`).join("\n");

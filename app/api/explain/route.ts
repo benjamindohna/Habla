@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatText } from "@/lib/llm";
-import { DEFAULT_TARGET, describeTargetLanguage } from "@/lib/targetLanguage";
+import { getSession } from "@/lib/auth";
+import { getUserById } from "@/lib/users";
+import { describeTargetLanguage, type TargetLanguageSpec } from "@/lib/targetLanguage";
 
 /**
  * Compute (min, max) sentence length range based on the local segment's
@@ -19,9 +21,10 @@ function buildPromptV1(
   localSegment: string,
   userSegment: string,
   nativeLanguage: string,
+  targetLanguage: TargetLanguageSpec,
 ): string {
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
+  const target = describeTargetLanguage(targetLanguage);
+  const targetName = targetLanguage.language;
   return `You are a helpful ${target} tutor. A learner is studying ${targetName} and wants feedback on a specific part of a sentence.
 
 Full sentence (perfect ${target}): "${localVersionTarget}"
@@ -45,9 +48,10 @@ function buildPromptV2(
   localSegment: string,
   userSegment: string,
   nativeLanguage: string,
+  targetLanguage: TargetLanguageSpec,
 ): string {
-  const target = describeTargetLanguage(DEFAULT_TARGET);
-  const targetName = DEFAULT_TARGET.language;
+  const target = describeTargetLanguage(targetLanguage);
+  const targetName = targetLanguage.language;
   const { min, max } = sentenceLimits(localSegment);
   const wordCount = localSegment.trim().split(/\s+/).filter(Boolean).length;
   return `You are a helpful ${target} tutor. A learner is studying ${targetName} and wants feedback on a specific part of a sentence.
@@ -78,6 +82,11 @@ Worked example (illustrative — Spanish target, German native; pattern applies 
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const user = getUserById(session.userId);
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
     const {
       localVersionTarget,
       localSegment,
@@ -114,7 +123,7 @@ export async function POST(req: NextRequest) {
     const explanation = await chatText({
       task,
       label: `explain/${task}${useV2 ? "/v2" : ""}`,
-      userPrompt: buildPrompt(localVersionTarget, localSegment, userSegment, nativeLanguage),
+      userPrompt: buildPrompt(localVersionTarget, localSegment, userSegment, nativeLanguage, user.targetLanguage),
       temperature: 0.4,
       maxTokens,
     });

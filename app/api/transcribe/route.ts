@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { toFile } from "openai";
 import { getOpenAI, TASK_MODELS, logAudioUsage } from "@/lib/llm";
-import { DEFAULT_TARGET } from "@/lib/targetLanguage";
+import { getSession } from "@/lib/auth";
+import { getUserById } from "@/lib/users";
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const user = getUserById(session.userId);
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
     const formData = await req.formData();
     const audioBlob = formData.get("audio") as Blob | null;
     const nativeLanguage = (formData.get("nativeLanguage") as string | null) ?? "English";
@@ -18,7 +24,7 @@ export async function POST(req: NextRequest) {
 
     // Prompt tells Whisper to expect mixed target + native language so it
     // doesn't force-map native-language words into target-language phonetics.
-    const targetName = DEFAULT_TARGET.language;
+    const targetName = user.targetLanguage.language;
     const transcription = await getOpenAI().audio.transcriptions.create({
       file: await toFile(buffer, "audio.webm", { type: audioBlob.type || "audio/webm" }),
       model: TASK_MODELS.transcription,

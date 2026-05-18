@@ -13,7 +13,7 @@
 import { getDb } from "./db";
 import { chatJSON } from "./llm";
 import { describeLevelScaleCompact, getLevelRange } from "./levels";
-import { DEFAULT_TARGET } from "./targetLanguage";
+import { parseTargetLanguageSpec } from "./targetLanguage";
 
 const MAX_RECENT_INPUTS = 5;
 const COOLDOWN_SECONDS = 24 * 60 * 60; // 24 hours between checks
@@ -22,6 +22,7 @@ const MAX_LEVEL_STEP = 3;
 interface LevelCheckRow {
   level: number;
   native_language: string;
+  target_language_json: string;
   recent_inputs_json: string;
   last_level_check_at: number | null;
 }
@@ -71,10 +72,12 @@ export async function runLevelCheckIfDue(userId: number): Promise<void> {
   const db = getDb();
   const row = db
     .prepare(
-      "SELECT level, native_language, recent_inputs_json, last_level_check_at FROM users WHERE id = ?",
+      "SELECT level, native_language, target_language_json, recent_inputs_json, last_level_check_at FROM users WHERE id = ?",
     )
     .get(userId) as LevelCheckRow | undefined;
   if (!row) return;
+  const targetLanguage = parseTargetLanguageSpec(row.target_language_json);
+  const targetName = targetLanguage.language;
 
   let inputs: string[];
   try {
@@ -94,14 +97,14 @@ export async function runLevelCheckIfDue(userId: number): Promise<void> {
   const range = getLevelRange(currentLevel);
   const prompt = `You are evaluating a language learner's proficiency level.
 
-The learner is studying ${DEFAULT_TARGET.language}; their native language is ${row.native_language}.
+The learner is studying ${targetName}; their native language is ${row.native_language}.
 
 LEVEL SCALE (1-100):
 ${describeLevelScaleCompact()}
 
 Their CURRENT level: ${currentLevel}/100 — range ${range.min}-${range.max} (${range.cefr}, "${range.short}").
 
-Their last ${MAX_RECENT_INPUTS} raw speech-to-text inputs in ${DEFAULT_TARGET.language} (verbatim transcripts, may contain ${row.native_language} fallback or errors):
+Their last ${MAX_RECENT_INPUTS} raw speech-to-text inputs in ${targetName} (verbatim transcripts, may contain ${row.native_language} fallback or errors):
 ${inputs.map((t, i) => `${i + 1}. "${t}"`).join("\n")}
 
 Looking at vocabulary range, grammar complexity, tense usage, native-language fallback density, and error patterns, decide whether the current level (${currentLevel}) accurately reflects this learner's production ability.

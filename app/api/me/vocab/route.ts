@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
       context_sentence: context,
       tapped_word_index: wordIndex,
       native_language: user.nativeLanguage,
+      targetLanguage: user.targetLanguage,
     });
     return NextResponse.json(result);
   } catch (err) {

@@ -46,6 +46,7 @@ export default function VocabSentencePage() {
   const [sentence, setSentence] = useState("");
   const [xAttempts, setXAttempts] = useState(0);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [mistakeHint, setMistakeHint] = useState<string | null>(null);
   const [revealReason, setRevealReason] = useState<RevealReason | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -99,6 +100,7 @@ export default function VocabSentencePage() {
       setSentence("");
       setXAttempts(0);
       setExplanation(null);
+      setMistakeHint(null);
       setRevealReason(null);
       setStage((prev) => (prev === "exiting" ? "ready" : prev));
     }, EXIT_DURATION_MS);
@@ -138,7 +140,11 @@ export default function VocabSentencePage() {
         body: JSON.stringify({ rowId: currentCard.id, userSentence: trimmed }),
       });
       if (!res.ok) throw new Error(`Judge failed (HTTP ${res.status})`);
-      const data = (await res.json()) as { result: "1" | "X" | "0"; english_description: string };
+      const data = (await res.json()) as {
+        result: "1" | "X" | "0";
+        english_description: string;
+        mistake_hint?: string | null;
+      };
 
       if (data.result === "1") {
         await fetch("/api/vocab/commit", {
@@ -160,6 +166,7 @@ export default function VocabSentencePage() {
           setSentence("");
         }
       } else {
+        setMistakeHint(data.mistake_hint ?? null);
         setRevealReason("wrong");
         setStage("revealed");
         setSentence("");
@@ -228,7 +235,7 @@ export default function VocabSentencePage() {
     if (revealReason === "gave-up") {
       return "Antwort:";
     }
-    return "Falsch — die gesuchte Bedeutung war:";
+    return "Falsch";
   }
 
   const inputDisabled = stage === "judging" || stage === "exiting";
@@ -315,6 +322,10 @@ export default function VocabSentencePage() {
                   >
                     {revealHeading()}
                   </p>
+
+                  {revealReason === "wrong" && mistakeHint && (
+                    <p className="mt-2 text-sm text-rose-900 leading-snug">{mistakeHint}</p>
+                  )}
 
                   {explanation === null ? (
                     <p className="mt-2 text-sm italic text-neutral-400">Antwort wird geladen…</p>

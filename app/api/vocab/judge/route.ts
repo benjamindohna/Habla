@@ -3,7 +3,6 @@ import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { getDb } from "@/lib/db";
 import { judgeVocabAnswer } from "@/lib/vocab";
-import { DEFAULT_TARGET } from "@/lib/targetLanguage";
 
 /**
  * Run the LLM judge for a single attempt. Does NOT modify SRS state —
@@ -50,7 +49,7 @@ export async function POST(req: NextRequest) {
       target_word: row.target_word_original,
       tested_description: row.english_description,
       user_answer: userAnswer.trim(),
-      target_language: DEFAULT_TARGET.language,
+      targetLanguage: user.targetLanguage,
       native_language: user.nativeLanguage,
     });
     return NextResponse.json({

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { getConversation, getMessages } from "@/lib/conversations";
+import { deleteConversationIfEmpty, getConversation, getMessages } from "@/lib/conversations";
 
 /**
  * Load a conversation and its full message history. Used by /chat/[id]
@@ -35,4 +35,30 @@ export async function GET(
     },
     messages,
   });
+}
+
+/**
+ * Delete an empty conversation. Used by /chat/[id] for the empty-chat
+ * cleanup when the user navigates away without recording or picking a
+ * topic. Strictly empty-only — a chat with any messages is left
+ * untouched (returns 409). Authorisation: owner only.
+ */
+export async function DELETE(
+  _req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const { id } = await ctx.params;
+  const conversationId = Number(id);
+  if (!Number.isFinite(conversationId) || conversationId <= 0) {
+    return NextResponse.json({ error: "Invalid conversation id" }, { status: 400 });
+  }
+
+  const deleted = deleteConversationIfEmpty(session.userId, conversationId);
+  if (!deleted) {
+    return NextResponse.json({ error: "Conversation not empty or not found" }, { status: 409 });
+  }
+  return NextResponse.json({ deleted: true });
 }

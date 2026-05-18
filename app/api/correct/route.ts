@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { getUserById } from "@/lib/users";
 import {
   interpret,
   localize,
@@ -21,6 +22,8 @@ import type { CorrectionResult } from "@/types/correction";
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const user = getUserById(session.userId);
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as {
     transcript?: string;
@@ -63,12 +66,13 @@ export async function POST(req: NextRequest) {
   try {
     const interpretation = override
       ? { intended_meaning_native: override, confidence: "high" as const, notes_native: "" }
-      : await interpret(transcript, nativeLanguage);
+      : await interpret(transcript, nativeLanguage, user.targetLanguage);
 
     const local_version_target = await localize({
       intendedMeaning: interpretation.intended_meaning_native,
       transcript,
       nativeLanguage,
+      targetLanguage: user.targetLanguage,
       style,
       task: localizeTask,
     });
@@ -77,6 +81,7 @@ export async function POST(req: NextRequest) {
       transcript,
       localVersionTarget: local_version_target,
       nativeLanguage,
+      targetLanguage: user.targetLanguage,
       task: segmentTask,
       improvedPrompt: useImprovedSegmentPrompt,
     });
