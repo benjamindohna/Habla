@@ -203,7 +203,7 @@ export default function Page() {
       </div>
 
       {recents !== null && recents.length > 0 && (
-        <div className="w-full max-w-md mt-12">
+        <div className="w-full max-w-md mt-12 mb-12">
           <p className="text-xs uppercase tracking-wider text-neutral-400 mb-3">Letzte Chats</p>
           <ul className="space-y-1">
             {recents.map((c) => (
@@ -224,6 +224,15 @@ export default function Page() {
           </ul>
         </div>
       )}
+
+      <footer className="w-full max-w-md mt-auto pt-8 pb-4 text-center">
+        <button
+          onClick={() => router.push("/privacy")}
+          className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
+        >
+          Datenschutz
+        </button>
+      </footer>
     </main>
   );
 }

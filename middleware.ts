@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
-const PUBLIC_PATHS = ["/login", "/api/auth"];
+const PUBLIC_PATHS = ["/login", "/api/auth", "/privacy"];
 
 function unauthorizedResponse(request: NextRequest, clearCookie: boolean): NextResponse {
   // API requests get a JSON 401; page navigations get redirected to /login.

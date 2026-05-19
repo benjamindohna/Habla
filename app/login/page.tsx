@@ -89,6 +89,15 @@ export default function LoginPage() {
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
+
+        <p className="mt-6 text-center">
+          <a
+            href="/privacy"
+            className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
+          >
+            Datenschutz
+          </a>
+        </p>
       </div>
     </div>
   );
