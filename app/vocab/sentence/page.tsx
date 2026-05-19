@@ -299,7 +299,13 @@ export default function VocabSentencePage() {
           stage === "exiting") &&
           currentCard && (
             <div className="space-y-6">
-              <VocabCardStack cards={cards} exitingId={exitingId} />
+              <VocabCardStack
+                cards={cards}
+                exitingId={exitingId}
+                onTapFront={
+                  stage === "ready" || stage === "feedback-x" ? handleDontKnow : undefined
+                }
+              />
 
               {stage === "revealed" && (
                 <div

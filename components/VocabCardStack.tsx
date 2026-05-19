@@ -57,9 +57,14 @@ interface Props {
    *  page place the answer input / feedback inside the same visual
    *  container without VocabCardStack knowing about that flow. */
   frontOverlay?: React.ReactNode;
+  /** Optional handler invoked when the user taps the front card itself
+   *  (specifically the word). Used by the practice page as a "flip /
+   *  reveal answer" shortcut so the user doesn't have to reach for the
+   *  X button. No-op when omitted. */
+  onTapFront?: () => void;
 }
 
-export default function VocabCardStack({ cards, exitingId, frontOverlay }: Props) {
+export default function VocabCardStack({ cards, exitingId, frontOverlay, onTapFront }: Props) {
   const isExiting = exitingId !== null;
   const visible = cards.slice(0, VISIBLE_LAYERS + (isExiting ? 1 : 0));
 
@@ -182,9 +187,20 @@ export default function VocabCardStack({ cards, exitingId, frontOverlay }: Props
                   <p className="text-xs uppercase tracking-wider text-neutral-400">
                     Stage {card.stage}
                   </p>
-                  <p className="text-3xl font-medium text-neutral-900 text-center break-words">
-                    {card.target_word_original}
-                  </p>
+                  {onTapFront ? (
+                    <button
+                      type="button"
+                      onClick={onTapFront}
+                      title="Antippen für die Lösung"
+                      className="text-3xl font-medium text-neutral-900 text-center break-words cursor-pointer hover:text-neutral-600 transition-colors focus:outline-none focus-visible:underline"
+                    >
+                      {card.target_word_original}
+                    </button>
+                  ) : (
+                    <p className="text-3xl font-medium text-neutral-900 text-center break-words">
+                      {card.target_word_original}
+                    </p>
+                  )}
                   {frontOverlay ? <div className="w-full mt-2">{frontOverlay}</div> : null}
                 </div>
               </>
