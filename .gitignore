@@ -22,3 +22,4 @@ ios/App/Pods/
 ios/App/build/
 ios/App/Podfile.lock
 ios/.gradle/
+Screenshot*.png
