@@ -88,7 +88,7 @@ export function parseTargetLanguageSpec(raw: string | null | undefined): TargetL
       typeof parsed === "object" &&
       parsed !== null &&
       typeof parsed.language === "string" &&
-      (parsed.location === null || typeof parsed.location === "string") &&
+      (parsed.location === undefined || parsed.location === null || typeof parsed.location === "string") &&
       (parsed.style === "everyday" || parsed.style === "street" || parsed.style === "office")
     ) {
       return {
