@@ -1,26 +1,21 @@
-import { getDb } from "./db";
+import { db } from "./db";
+import { conversations, messages } from "./schema";
+import { and, count, desc, eq, isNull, max, not, sql } from "drizzle-orm";
 import { chatText } from "./llm";
 import type { Pair } from "@/types/correction";
 import type { Segment } from "@/types/segment";
 
 export type MessageRole = "ai" | "user";
 
+// Public-facing row shape uses snake_case to keep callers stable across
+// the better-sqlite3 → Drizzle migration. Internally Drizzle uses
+// camelCase but we convert on the way out.
 export interface ConversationRow {
   id: number;
   user_id: number;
   topic: string;
   created_at: number;
   ended_at: number | null;
-}
-
-export interface MessageRow {
-  id: number;
-  conversation_id: number;
-  role: MessageRole;
-  text_target: string;
-  user_raw: string | null;
-  segments_json: string | null;
-  created_at: number;
 }
 
 /**
@@ -38,88 +33,96 @@ export interface Message {
   createdAt: number;
 }
 
-function rowToMessage(row: MessageRow): Message {
+export async function createConversation(userId: number, topic: string): Promise<number> {
+  const [row] = await db
+    .insert(conversations)
+    .values({ userId, topic })
+    .returning({ id: conversations.id });
+  return row.id;
+}
+
+export async function getConversation(id: number): Promise<ConversationRow | null> {
+  const rows = await db.select().from(conversations).where(eq(conversations.id, id)).limit(1);
+  const r = rows[0];
+  if (!r) return null;
   return {
-    id: row.id,
-    role: row.role,
-    textTarget: row.text_target,
-    userRaw: row.user_raw,
-    segments: row.segments_json ? JSON.parse(row.segments_json) : null,
-    createdAt: row.created_at,
+    id: r.id,
+    user_id: r.userId,
+    topic: r.topic,
+    created_at: r.createdAt,
+    ended_at: r.endedAt,
   };
 }
 
-export function createConversation(userId: number, topic: string): number {
-  const result = getDb()
-    .prepare("INSERT INTO conversations (user_id, topic) VALUES (?, ?)")
-    .run(userId, topic);
-  return Number(result.lastInsertRowid);
+export async function getMessages(conversationId: number): Promise<Message[]> {
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.conversationId, conversationId))
+    .orderBy(messages.id);
+  return rows.map((r) => ({
+    id: r.id,
+    role: r.role as MessageRole,
+    textTarget: r.textTarget,
+    userRaw: r.userRaw,
+    segments: r.segmentsJson ? (JSON.parse(r.segmentsJson) as Pair[] | Segment[]) : null,
+    createdAt: r.createdAt,
+  }));
 }
 
-export function getConversation(id: number): ConversationRow | null {
-  const row = getDb()
-    .prepare("SELECT * FROM conversations WHERE id = ?")
-    .get(id) as ConversationRow | undefined;
-  return row ?? null;
-}
-
-export function getMessages(conversationId: number): Message[] {
-  const rows = getDb()
-    .prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY id")
-    .all(conversationId) as MessageRow[];
-  return rows.map(rowToMessage);
-}
-
-export function appendMessage(input: {
+export async function appendMessage(input: {
   conversationId: number;
   role: MessageRole;
   textTarget: string;
   userRaw?: string | null;
   segments?: Pair[] | Segment[] | null;
-}): number {
-  const result = getDb()
-    .prepare(
-      `INSERT INTO messages (conversation_id, role, text_target, user_raw, segments_json)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.conversationId,
-      input.role,
-      input.textTarget,
-      input.userRaw ?? null,
-      input.segments ? JSON.stringify(input.segments) : null,
-    );
-  return Number(result.lastInsertRowid);
+}): Promise<number> {
+  const [row] = await db
+    .insert(messages)
+    .values({
+      conversationId: input.conversationId,
+      role: input.role,
+      textTarget: input.textTarget,
+      userRaw: input.userRaw ?? null,
+      segmentsJson: input.segments ? JSON.stringify(input.segments) : null,
+    })
+    .returning({ id: messages.id });
+  return row.id;
 }
 
-export function markConversationEnded(conversationId: number): void {
-  getDb()
-    .prepare("UPDATE conversations SET ended_at = strftime('%s','now') WHERE id = ? AND ended_at IS NULL")
-    .run(conversationId);
+export async function markConversationEnded(conversationId: number): Promise<void> {
+  await db
+    .update(conversations)
+    .set({ endedAt: sql`EXTRACT(EPOCH FROM NOW())::INTEGER` })
+    .where(and(eq(conversations.id, conversationId), isNull(conversations.endedAt)));
 }
 
-export function updateConversationTopic(conversationId: number, topic: string): void {
-  getDb()
-    .prepare("UPDATE conversations SET topic = ? WHERE id = ?")
-    .run(topic, conversationId);
+export async function updateConversationTopic(conversationId: number, topic: string): Promise<void> {
+  await db.update(conversations).set({ topic }).where(eq(conversations.id, conversationId));
 }
 
 /** Deletes a conversation IF it belongs to userId AND has zero messages.
  *  Returns true on delete, false otherwise. Used for empty-chat cleanup
  *  when the user navigates away without interacting. */
-export function deleteConversationIfEmpty(userId: number, conversationId: number): boolean {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT c.id
-       FROM conversations c
-       WHERE c.id = ? AND c.user_id = ?
-         AND NOT EXISTS (SELECT 1 FROM messages WHERE conversation_id = c.id)`,
-    )
-    .get(conversationId, userId);
-  if (!row) return false;
-  db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
-  return true;
+export async function deleteConversationIfEmpty(userId: number, conversationId: number): Promise<boolean> {
+  // Two-step: check messages exist, then delete. Wrapped in transaction
+  // so a concurrent message insert can't race past the check.
+  return await db.transaction(async (tx) => {
+    const owned = await tx
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+      .limit(1);
+    if (owned.length === 0) return false;
+    const hasMsg = await tx
+      .select({ id: messages.id })
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .limit(1);
+    if (hasMsg.length > 0) return false;
+    await tx.delete(conversations).where(eq(conversations.id, conversationId));
+    return true;
+  });
 }
 
 export interface RecentConversation {
@@ -131,42 +134,35 @@ export interface RecentConversation {
 
 /** Recent non-empty conversations for the homepage list. Sorted by
  *  last activity (latest message timestamp), most recent first. */
-export function getRecentConversations(userId: number, limit: number): RecentConversation[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT c.id, c.topic,
-              COALESCE(MAX(m.created_at), c.created_at) AS last_activity,
-              COUNT(m.id) AS message_count
-       FROM conversations c
-       INNER JOIN messages m ON m.conversation_id = c.id
-       WHERE c.user_id = ?
-       GROUP BY c.id
-       ORDER BY last_activity DESC
-       LIMIT ?`,
-    )
-    .all(userId, limit) as Array<{
-    id: number;
-    topic: string;
-    last_activity: number;
-    message_count: number;
-  }>;
+export async function getRecentConversations(userId: number, limit: number): Promise<RecentConversation[]> {
+  const lastActivity = sql<number>`COALESCE(MAX(${messages.createdAt}), ${conversations.createdAt})`.as("last_activity");
+  const messageCount = count(messages.id).as("message_count");
+  const rows = await db
+    .select({
+      id: conversations.id,
+      topic: conversations.topic,
+      lastActivity,
+      messageCount,
+    })
+    .from(conversations)
+    .innerJoin(messages, eq(messages.conversationId, conversations.id))
+    .where(eq(conversations.userId, userId))
+    .groupBy(conversations.id)
+    .orderBy(desc(lastActivity))
+    .limit(limit);
   return rows.map((r) => ({
     id: r.id,
     topic: r.topic,
-    lastActivity: r.last_activity,
-    messageCount: r.message_count,
+    lastActivity: Number(r.lastActivity),
+    messageCount: Number(r.messageCount),
   }));
 }
 
 /** Derives a short, target-language conversation title from the first
  *  user message. Used when the user starts a chat by speaking instead
- *  of picking a topic — we want every conversation to have a label for
- *  the recent-chats list and analytics. Fires in parallel with the AI
- *  reply so it never adds turn latency.
- *
- *  Output is in the TARGET language so the homepage chat list matches
- *  the rest of the topic-naming convention ("¿Qué pasaría si...?",
- *  "El estilo de juego de Messi"). */
+ *  of picking a topic. Fires in parallel with the AI reply so it never
+ *  adds turn latency. Output is in the target language to match the
+ *  rest of the topic-naming convention. */
 export async function deriveConversationTopic(args: {
   firstUserMessage: string;
   targetLanguage: string;
@@ -192,3 +188,8 @@ Return ONLY the title string. No quotes, no explanation.`;
   });
   return raw.replace(/^["'\s]+|["'.\s]+$/g, "").trim();
 }
+
+// Suppress unused-import warnings from `max` and `not` (kept available
+// for future filter additions).
+void max;
+void not;

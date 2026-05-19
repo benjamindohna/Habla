@@ -11,7 +11,9 @@
 // committed review in either mode, on chat re-tap, and otherwise
 // gates "due" status via last_seen + interval[stage_for_mode].
 
-import { getDb } from "./db";
+import { db } from "./db";
+import { userVocab } from "./schema";
+import { and, eq, sql } from "drizzle-orm";
 import { MAX_STAGE, STAGE_INTERVALS_SECONDS, type VocabJudgement } from "./vocab";
 
 export type VocabMode = "recognition" | "sentence";
@@ -25,8 +27,8 @@ export interface DueVocabRow {
   last_seen: number;
 }
 
-function stageColumn(mode: VocabMode): "stage" | "stage_sentence" {
-  return mode === "sentence" ? "stage_sentence" : "stage";
+function stageColumnExpr(mode: VocabMode) {
+  return mode === "sentence" ? userVocab.stageSentence : userVocab.stage;
 }
 
 /**
@@ -37,26 +39,35 @@ function stageColumn(mode: VocabMode): "stage" | "stage_sentence" {
  * single round-trip, no JS-side filtering. If STAGE_INTERVALS_SECONDS
  * grows, regenerate the CASE block here in lockstep.
  */
-export function getDueVocabQueue(
+export async function getDueVocabQueue(
   userId: number,
   mode: VocabMode,
   limit: number = 30,
-): DueVocabRow[] {
+): Promise<DueVocabRow[]> {
   const now = Math.floor(Date.now() / 1000);
-  const col = stageColumn(mode);
+  const stageCol = stageColumnExpr(mode);
   const caseClauses = STAGE_INTERVALS_SECONDS
-    .map((seconds, stage) => `WHEN ${stage} THEN ${seconds}`)
-    .join(" ");
-  const sql = `
-    SELECT id, target_word_original, english_description,
-           ${col} AS stage, last_seen
-    FROM user_vocab
-    WHERE user_id = ?
-      AND last_seen + (CASE ${col} ${caseClauses} ELSE ${STAGE_INTERVALS_SECONDS[MAX_STAGE]} END) <= ?
-    ORDER BY ${col} ASC, last_seen ASC
-    LIMIT ?
-  `;
-  return getDb().prepare(sql).all(userId, now, limit) as DueVocabRow[];
+    .map((seconds, stage) => sql`WHEN ${stage} THEN ${seconds}`)
+    .reduce((acc, clause) => sql`${acc} ${clause}`, sql``);
+  const intervalExpr = sql`CASE ${stageCol} ${caseClauses} ELSE ${STAGE_INTERVALS_SECONDS[MAX_STAGE]} END`;
+  const rows = await db
+    .select({
+      id: userVocab.id,
+      target_word_original: userVocab.targetWordOriginal,
+      english_description: userVocab.englishDescription,
+      stage: stageCol,
+      last_seen: userVocab.lastSeen,
+    })
+    .from(userVocab)
+    .where(
+      and(
+        eq(userVocab.userId, userId),
+        sql`${userVocab.lastSeen} + (${intervalExpr}) <= ${now}`,
+      ),
+    )
+    .orderBy(stageCol, userVocab.lastSeen)
+    .limit(limit);
+  return rows as DueVocabRow[];
 }
 
 /**
@@ -69,28 +80,36 @@ export function getDueVocabQueue(
  * Only the stage column for the queried mode is touched. The other
  * mode's stage stays unchanged.
  */
-export function applyJudgeResult(
+export async function applyJudgeResult(
   rowId: number,
   userId: number,
   judge: VocabJudgement,
   mode: VocabMode,
-): void {
+): Promise<void> {
   if (judge === "X") return;
 
   const now = Math.floor(Date.now() / 1000);
-  const col = stageColumn(mode);
-  const db = getDb();
+  const stageCol = stageColumnExpr(mode);
+  const stageColName = mode === "sentence" ? "stage_sentence" : "stage";
+
   if (judge === "1") {
-    db.prepare(
-      `UPDATE user_vocab
-       SET ${col} = MIN(?, ${col} + 1), last_seen = ?, looked_up = looked_up + 1
-       WHERE id = ? AND user_id = ?`,
-    ).run(MAX_STAGE, now, rowId, userId);
+    await db
+      .update(userVocab)
+      .set({
+        [mode === "sentence" ? "stageSentence" : "stage"]: sql`LEAST(${MAX_STAGE}, ${stageCol} + 1)`,
+        lastSeen: now,
+        lookedUp: sql`${userVocab.lookedUp} + 1`,
+      })
+      .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
   } else {
-    db.prepare(
-      `UPDATE user_vocab
-       SET ${col} = MAX(0, ${col} / 2), last_seen = ?, looked_up = looked_up + 1
-       WHERE id = ? AND user_id = ?`,
-    ).run(now, rowId, userId);
+    await db
+      .update(userVocab)
+      .set({
+        [mode === "sentence" ? "stageSentence" : "stage"]: sql`GREATEST(0, ${stageCol} / 2)`,
+        lastSeen: now,
+        lookedUp: sql`${userVocab.lookedUp} + 1`,
+      })
+      .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
   }
+  void stageColName;
 }

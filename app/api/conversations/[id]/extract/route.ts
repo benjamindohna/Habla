@@ -4,7 +4,9 @@ import { getSession } from "@/lib/auth";
 import { getUserById, getUserInterests, setUserInterests, setUserInterestsText } from "@/lib/users";
 import { getConversation, getMessages, markConversationEnded } from "@/lib/conversations";
 import { generateAndStoreNext, invalidateNextSet } from "@/lib/topicSets";
-import { getDb } from "@/lib/db";
+import { db } from "@/lib/db";
+import { userInterests } from "@/lib/schema";
+import { and, eq } from "drizzle-orm";
 
 const MAX_TAGS = 12;
 const RECENT_TAGS = 5;
@@ -13,7 +15,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const { id } = await ctx.params;
@@ -22,7 +24,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "Invalid conversation id" }, { status: 400 });
   }
 
-  const conversation = getConversation(conversationId);
+  const conversation = await getConversation(conversationId);
   if (!conversation || conversation.user_id !== user.id) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
@@ -33,16 +35,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ ok: true, alreadyExtracted: true });
   }
 
-  const messages = getMessages(conversationId);
+  const messages = await getMessages(conversationId);
   // Skip extraction for trivial conversations (just the opener, or one user
   // turn) — the LLM has nothing to learn from.
   const userTurns = messages.filter((m) => m.role === "user").length;
   if (userTurns < 1) {
-    markConversationEnded(conversationId);
+    await markConversationEnded(conversationId);
     return NextResponse.json({ ok: true, skipped: "too short" });
   }
 
-  const currentInterests = getUserInterests(user.id);
+  const currentInterests = await getUserInterests(user.id);
 
   const transcript = messages
     .map((m) => (m.role === "ai" ? `AI: ${m.textTarget}` : `LEARNER: ${m.textTarget}`))
@@ -97,24 +99,23 @@ Return ONLY valid JSON:
 
     // Wholesale replace user_interests with the curated list, preserving
     // is_recent flags. Do this in a transaction.
-    const db = getDb();
-    const tx = db.transaction(() => {
-      // Use existing helper for the basic insert, then patch is_recent.
-      setUserInterests(user.id, tags.map((t) => t.name));
-      const stmt = db.prepare(
-        "UPDATE user_interests SET is_recent = ? WHERE user_id = ? AND interest = ?",
-      );
-      for (const t of tags) stmt.run(t.recent ? 1 : 0, user.id, t.name);
+    await db.transaction(async (tx) => {
+      await tx.delete(userInterests).where(eq(userInterests.userId, user.id));
+      if (tags.length > 0) {
+        await tx.insert(userInterests).values(
+          tags.map((t) => ({ userId: user.id, interest: t.name, isRecent: t.recent ? 1 : 0 })),
+        );
+      }
     });
-    tx();
+    void and;
 
-    setUserInterestsText(user.id, narrative);
-    markConversationEnded(conversationId);
+    await setUserInterestsText(user.id, narrative);
+    await markConversationEnded(conversationId);
 
     // Existing preloaded `next` set was generated against stale interests.
     // Drop it and kick off background regeneration against fresh interests
     // so the user's first re-roll after the chat is still instant.
-    invalidateNextSet(user.id);
+    await invalidateNextSet(user.id);
     generateAndStoreNext(user.id).catch((err) =>
       console.error("[/api/conversations/:id/extract] background next-gen failed:", err),
     );

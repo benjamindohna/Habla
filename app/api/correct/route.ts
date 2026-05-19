@@ -22,7 +22,7 @@ import type { CorrectionResult } from "@/types/correction";
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
   // Adaptive level tracker: push the raw transcript into the user's
   // FIFO ring of last 5 inputs, then fire-and-forget the cadence check
   // (no-op unless 5 inputs are present and >24h since last check).
-  pushRecentInput(session.userId, transcript);
+  await pushRecentInput(session.userId, transcript);
   void runLevelCheckIfDue(session.userId);
   const style: CorrectionStyle = body.style === "transcript_aware" ? "transcript_aware" : "natural";
   const override = body.overrideIntendedMeaning?.trim();

@@ -13,12 +13,12 @@ export async function GET() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  const interests = getUserInterests(user.id);
+  const interests = await getUserInterests(user.id);
 
   return NextResponse.json({
     id: user.id,
@@ -49,6 +49,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Invalid correctionStyle" }, { status: 400 });
   }
 
-  setUserCorrectionStyle(session.userId, next as CorrectionStyle);
+  await setUserCorrectionStyle(session.userId, next as CorrectionStyle);
   return NextResponse.json({ ok: true, correctionStyle: next });
 }

@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    const user = getUserById(session.userId);
+    const user = await getUserById(session.userId);
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
     const { text, speed } = (await req.json()) as { text: string; speed?: number };

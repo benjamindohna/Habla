@@ -1,62 +1,32 @@
-// Adaptive level tracker.
-//
-// pushRecentInput   — FIFO push of a raw STT transcript into the user's
-//                     last-5 ring. Also bumps a per-user counter of
-//                     samples produced since the last successful level
-//                     check (samples_since_last_check). Called from
-//                     /api/correct as the user submits a turn.
-// runLevelCheckIfDue — fire-and-forget cadence check. The check fires
-//                     when ALL of these hold:
-//                       • ring is full (5 samples present)
-//                       • last_level_check_at is NULL OR ≥6h old (cooldown)
-//                       • samples_since_last_check ≥ 3 (gate)
-//                     On success: level is reassessed (max ±3 step),
-//                     last_level_check_at is touched, and the counter
-//                     is reset to 0 so the next 6h window starts fresh.
-//
-// Sequencing intuition: if the user crams a lot of speech into the 6h
-// cooldown window, no check fires until the wall-clock crosses 6h —
-// then the very next qualifying input causes the check. If the user
-// dribbles 2 samples in 6h and only does the 3rd a day later, the
-// check fires on that 3rd sample regardless of the now-long gap.
+// Adaptive level tracker. See file-history for the firing rules
+// (6h cooldown + ≥3-new-sample gate, ring of last 5 inputs).
 
-import { getDb } from "./db";
+import { db } from "./db";
+import { users } from "./schema";
+import { eq, sql } from "drizzle-orm";
 import { chatJSON } from "./llm";
 import { describeLevelScaleCompact, getLevelRange } from "./levels";
 import { parseTargetLanguageSpec } from "./targetLanguage";
 
 const MAX_RECENT_INPUTS = 5;
-const COOLDOWN_SECONDS = 6 * 60 * 60; // 6 hours between checks
-const MIN_NEW_SAMPLES = 3; // gate: at least 3 fresh samples since last check
+const COOLDOWN_SECONDS = 6 * 60 * 60;
+const MIN_NEW_SAMPLES = 3;
 const MAX_LEVEL_STEP = 3;
 
-interface LevelCheckRow {
-  level: number;
-  native_language: string;
-  target_language_json: string;
-  recent_inputs_json: string;
-  last_level_check_at: number | null;
-  samples_since_last_check: number;
-}
-
-/**
- * Pushes the raw transcript into the user's last-5 ring and bumps the
- * "samples since last check" counter. Atomic read-modify-write; safe
- * across concurrent /api/correct calls.
- */
-export function pushRecentInput(userId: number, transcript: string): void {
+export async function pushRecentInput(userId: number, transcript: string): Promise<void> {
   const trimmed = transcript.trim();
   if (!trimmed) return;
 
-  const db = getDb();
-  const row = db
-    .prepare("SELECT recent_inputs_json FROM users WHERE id = ?")
-    .get(userId) as { recent_inputs_json: string } | undefined;
-  if (!row) return;
+  const rows = await db
+    .select({ recent_inputs_json: users.recentInputsJson })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (rows.length === 0) return;
 
   let inputs: string[];
   try {
-    const parsed = JSON.parse(row.recent_inputs_json);
+    const parsed = JSON.parse(rows[0].recent_inputs_json);
     inputs = Array.isArray(parsed) ? (parsed.filter((s) => typeof s === "string") as string[]) : [];
   } catch {
     inputs = [];
@@ -67,35 +37,30 @@ export function pushRecentInput(userId: number, transcript: string): void {
     inputs = inputs.slice(inputs.length - MAX_RECENT_INPUTS);
   }
 
-  db.prepare(
-    `UPDATE users
-       SET recent_inputs_json       = ?,
-           samples_since_last_check = samples_since_last_check + 1
-     WHERE id = ?`,
-  ).run(JSON.stringify(inputs), userId);
+  await db
+    .update(users)
+    .set({
+      recentInputsJson: JSON.stringify(inputs),
+      samplesSinceLastCheck: sql`${users.samplesSinceLastCheck} + 1`,
+    })
+    .where(eq(users.id, userId));
 }
 
-/**
- * Checks whether the user is due for a level reassessment and runs it
- * if so. Safe to call as fire-and-forget — caller never awaits and
- * errors are swallowed.
- *
- * Due conditions (ALL must hold):
- *   • ring is full (5 samples present)
- *   • cooldown elapsed: last_level_check_at IS NULL or ≥COOLDOWN_SECONDS old
- *   • gate met: samples_since_last_check ≥ MIN_NEW_SAMPLES
- *
- * On a successful check we reset samples_since_last_check = 0 and
- * stamp last_level_check_at so the next 6h window starts fresh.
- */
 export async function runLevelCheckIfDue(userId: number): Promise<void> {
-  const db = getDb();
-  const row = db
-    .prepare(
-      "SELECT level, native_language, target_language_json, recent_inputs_json, last_level_check_at, samples_since_last_check FROM users WHERE id = ?",
-    )
-    .get(userId) as LevelCheckRow | undefined;
-  if (!row) return;
+  const rows = await db
+    .select({
+      level: users.level,
+      native_language: users.nativeLanguage,
+      target_language_json: users.targetLanguageJson,
+      recent_inputs_json: users.recentInputsJson,
+      last_level_check_at: users.lastLevelCheckAt,
+      samples_since_last_check: users.samplesSinceLastCheck,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (rows.length === 0) return;
+  const row = rows[0];
   const targetLanguage = parseTargetLanguageSpec(row.target_language_json);
   const targetName = targetLanguage.language;
 
@@ -157,19 +122,15 @@ Return ONLY valid JSON:
   }
 
   const raw = typeof result.new_level === "number" && Number.isFinite(result.new_level) ? result.new_level : currentLevel;
-  // Clamp to ±MAX_LEVEL_STEP and the 1-100 bounds.
   const clamped = Math.max(
     Math.max(1, currentLevel - MAX_LEVEL_STEP),
     Math.min(Math.min(100, currentLevel + MAX_LEVEL_STEP), Math.round(raw)),
   );
 
-  db.prepare(
-    `UPDATE users
-       SET level                    = ?,
-           last_level_check_at      = ?,
-           samples_since_last_check = 0
-     WHERE id = ?`,
-  ).run(clamped, now, userId);
+  await db
+    .update(users)
+    .set({ level: clamped, lastLevelCheckAt: now, samplesSinceLastCheck: 0 })
+    .where(eq(users.id, userId));
 
   if (clamped !== currentLevel) {
     console.log(

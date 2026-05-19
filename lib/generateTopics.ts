@@ -1,5 +1,7 @@
 import { chatJSON } from "./llm";
-import { getDb } from "./db";
+import { db } from "./db";
+import { userInterests } from "./schema";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { getUserById } from "./users";
 import { describeTargetLanguage, type TargetLanguageSpec } from "./targetLanguage";
 
@@ -81,14 +83,15 @@ export async function generateTopicsForUser(
   userId: number,
   exclude: string[],
 ): Promise<Topic[]> {
-  const user = getUserById(userId);
+  const user = await getUserById(userId);
   if (!user) throw new Error(`User ${userId} not found`);
 
-  const interests = getDb()
-    .prepare(
-      "SELECT interest, is_recent FROM user_interests WHERE user_id = ? ORDER BY is_recent DESC, added_at",
-    )
-    .all(userId) as InterestRow[];
+  const interests = (await db
+    .select({ interest: userInterests.interest, is_recent: userInterests.isRecent })
+    .from(userInterests)
+    .where(eq(userInterests.userId, userId))
+    .orderBy(desc(userInterests.isRecent), asc(userInterests.addedAt))) as InterestRow[];
+  void and;
 
   const prompt = buildPrompt({
     nativeLanguage: user.nativeLanguage,

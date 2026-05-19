@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
   }
 
-  const user = getUserByEmail(email);
+  const user = await getUserByEmail(email);
 
   // Always run bcrypt compare to prevent timing attacks (even for unknown users)
   const dummyHash = "$2b$10$invalidhashusedtopreventinenumerationtiming00000000000";

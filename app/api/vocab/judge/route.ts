@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
-import { getDb } from "@/lib/db";
+import { db } from "@/lib/db";
+import { userVocab } from "@/lib/schema";
+import { and, eq } from "drizzle-orm";
 import { judgeVocabAnswer } from "@/lib/vocab";
 
 /**
@@ -16,7 +18,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -32,29 +34,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "userAnswer required" }, { status: 400 });
   }
 
-  const row = getDb()
-    .prepare(
-      `SELECT id, target_word_original, english_description
-       FROM user_vocab WHERE id = ? AND user_id = ?`,
-    )
-    .get(rowId, session.userId) as
-    | { id: number; target_word_original: string; english_description: string }
-    | undefined;
+  const rows = await db
+    .select({
+      id: userVocab.id,
+      targetWordOriginal: userVocab.targetWordOriginal,
+      englishDescription: userVocab.englishDescription,
+    })
+    .from(userVocab)
+    .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, session.userId)))
+    .limit(1);
+  const row = rows[0];
   if (!row) {
     return NextResponse.json({ error: "Card not found" }, { status: 404 });
   }
 
   try {
     const verdict = await judgeVocabAnswer({
-      target_word: row.target_word_original,
-      tested_description: row.english_description,
+      target_word: row.targetWordOriginal,
+      tested_description: row.englishDescription,
       user_answer: userAnswer.trim(),
       targetLanguage: user.targetLanguage,
       native_language: user.nativeLanguage,
     });
     return NextResponse.json({
       result: verdict,
-      english_description: row.english_description,
+      english_description: row.englishDescription,
     });
   } catch (err) {
     console.error("[/api/vocab/judge]", err);

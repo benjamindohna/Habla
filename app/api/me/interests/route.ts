@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   // INSERT OR IGNORE — duplicates are silently skipped (PRIMARY KEY collision).
   // No interests_text regeneration here; that happens in Phase 7's post-chat
   // curation step which has a richer signal (the actual conversation).
-  addUserInterest(session.userId, interest.trim());
+  await addUserInterest(session.userId, interest.trim());
 
   return NextResponse.json({ ok: true });
 }

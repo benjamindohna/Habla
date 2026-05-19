@@ -20,12 +20,12 @@ export async function GET(
     return NextResponse.json({ error: "Invalid conversation id" }, { status: 400 });
   }
 
-  const conversation = getConversation(conversationId);
+  const conversation = await getConversation(conversationId);
   if (!conversation || conversation.user_id !== session.userId) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  const messages = getMessages(conversationId);
+  const messages = await getMessages(conversationId);
   return NextResponse.json({
     conversation: {
       id: conversation.id,
@@ -56,7 +56,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Invalid conversation id" }, { status: 400 });
   }
 
-  const deleted = deleteConversationIfEmpty(session.userId, conversationId);
+  const deleted = await deleteConversationIfEmpty(session.userId, conversationId);
   if (!deleted) {
     return NextResponse.json({ error: "Conversation not empty or not found" }, { status: 409 });
   }

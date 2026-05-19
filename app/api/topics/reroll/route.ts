@@ -12,13 +12,13 @@ export async function POST() {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   // Happy path: next is already populated → instant rotation.
-  let topics = rotateNextToCurrent(session.userId);
+  let topics = await rotateNextToCurrent(session.userId);
 
   // Synchronous fallback: user re-rolled before background gen finished, or
   // background gen failed silently. Pay the latency once, then continue.
   if (!topics) {
     await generateAndStoreCurrent(session.userId);
-    topics = getCurrentSet(session.userId);
+    topics = await getCurrentSet(session.userId);
     if (!topics) return NextResponse.json({ error: "Failed to generate" }, { status: 500 });
   }
 

@@ -35,6 +35,6 @@ export async function POST(req: NextRequest) {
   }
   const mode: VocabMode = body.mode === "sentence" ? "sentence" : "recognition";
 
-  applyJudgeResult(rowId, session.userId, result, mode);
+  await applyJudgeResult(rowId, session.userId, result, mode);
   return NextResponse.json({ ok: true });
 }

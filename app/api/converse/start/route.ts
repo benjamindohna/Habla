@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -81,16 +81,16 @@ Return ONLY the message text in ${targetName}. No JSON, no quotes, no preamble, 
     // legacy atomic shape.
     let conversationId: number;
     if (existingId !== undefined) {
-      const existing = getConversation(existingId);
+      const existing = await getConversation(existingId);
       if (!existing || existing.user_id !== user.id) {
         return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
       }
       conversationId = existingId;
-      updateConversationTopic(conversationId, topic.trim());
+      await updateConversationTopic(conversationId, topic.trim());
     } else {
-      conversationId = createConversation(user.id, topic.trim());
+      conversationId = await createConversation(user.id, topic.trim());
     }
-    appendMessage({
+    await appendMessage({
       conversationId,
       role: "ai",
       textTarget: text,

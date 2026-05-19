@@ -9,14 +9,20 @@
     "seed": "tsx scripts/seed.ts",
     "warm": "node --env-file=.env.local --import tsx scripts/warm.ts",
     "backfill-vocab-assets": "node --env-file=.env.local --import tsx scripts/backfillVocabAssets.ts",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "db:generate": "node --env-file=.env.local node_modules/.bin/drizzle-kit generate",
+    "db:migrate": "node --env-file=.env.local node_modules/.bin/drizzle-kit migrate",
+    "db:push": "node --env-file=.env.local node_modules/.bin/drizzle-kit push",
+    "db:studio": "node --env-file=.env.local node_modules/.bin/drizzle-kit studio"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.9.0",
+    "drizzle-orm": "^0.45.2",
     "jose": "^6.2.1",
     "next": "^15.1.0",
     "openai": "^4.76.0",
+    "postgres": "^3.4.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -27,6 +33,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.31.10",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.21.0",

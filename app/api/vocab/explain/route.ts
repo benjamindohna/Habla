@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
-import { getDb } from "@/lib/db";
+import { db } from "@/lib/db";
+import { userVocab } from "@/lib/schema";
+import { and, eq } from "drizzle-orm";
 import { generateExplanation } from "@/lib/vocabExplain";
 
 /**
@@ -11,15 +13,12 @@ import { generateExplanation } from "@/lib/vocabExplain";
  * LLM call. Otherwise the prompt fires, and the result is written back
  * to the row before being returned — so the second call is always
  * cached.
- *
- * Stage / SRS state is NOT modified here. Stage update happens
- * separately via /api/vocab/commit when the user clicks Weiter.
  */
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as { rowId?: number };
@@ -28,46 +27,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "rowId required" }, { status: 400 });
   }
 
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT id, target_word_original, context_sentence,
-              native_translation, native_hint
-       FROM user_vocab WHERE id = ? AND user_id = ?`,
-    )
-    .get(rowId, session.userId) as
-    | {
-        id: number;
-        target_word_original: string;
-        context_sentence: string | null;
-        native_translation: string | null;
-        native_hint: string | null;
-      }
-    | undefined;
+  const rows = await db
+    .select({
+      id: userVocab.id,
+      targetWordOriginal: userVocab.targetWordOriginal,
+      contextSentence: userVocab.contextSentence,
+      nativeTranslation: userVocab.nativeTranslation,
+      nativeHint: userVocab.nativeHint,
+    })
+    .from(userVocab)
+    .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, session.userId)))
+    .limit(1);
+  const row = rows[0];
   if (!row) {
     return NextResponse.json({ error: "Card not found" }, { status: 404 });
   }
 
   // Cache hit: both fields populated → return directly.
-  if (row.native_translation && row.native_hint !== null) {
+  if (row.nativeTranslation && row.nativeHint !== null) {
     return NextResponse.json({
-      translation: row.native_translation,
-      hint: row.native_hint,
+      translation: row.nativeTranslation,
+      hint: row.nativeHint,
     });
   }
 
   // Cache miss: generate, persist, return.
   try {
     const result = await generateExplanation({
-      target_word: row.target_word_original,
-      context_sentence: row.context_sentence ?? "",
+      target_word: row.targetWordOriginal,
+      context_sentence: row.contextSentence ?? "",
       targetLanguage: user.targetLanguage,
       native_language: user.nativeLanguage,
     });
-    db.prepare(
-      `UPDATE user_vocab SET native_translation = ?, native_hint = ?
-       WHERE id = ? AND user_id = ?`,
-    ).run(result.translation, result.hint, row.id, session.userId);
+    await db
+      .update(userVocab)
+      .set({ nativeTranslation: result.translation, nativeHint: result.hint })
+      .where(and(eq(userVocab.id, row.id), eq(userVocab.userId, session.userId)));
     return NextResponse.json(result);
   } catch (err) {
     console.error("[/api/vocab/explain]", err);

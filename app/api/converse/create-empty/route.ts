@@ -21,9 +21,9 @@ export async function POST() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  const conversationId = createConversation(user.id, "");
+  const conversationId = await createConversation(user.id, "");
   return NextResponse.json({ conversationId });
 }

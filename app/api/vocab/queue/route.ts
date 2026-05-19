@@ -18,6 +18,6 @@ export async function GET(req: NextRequest) {
   const limit = Number.isFinite(limitParam) && limitParam > 0 && limitParam <= 100 ? limitParam : 30;
   const mode: VocabMode = url.searchParams.get("mode") === "sentence" ? "sentence" : "recognition";
 
-  const cards = getDueVocabQueue(session.userId, mode, limit);
+  const cards = await getDueVocabQueue(session.userId, mode, limit);
   return NextResponse.json({ cards });
 }

@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -40,14 +40,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "userTextTarget required" }, { status: 400 });
   }
 
-  const conversation = getConversation(conversationId);
+  const conversation = await getConversation(conversationId);
   if (!conversation || conversation.user_id !== user.id) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
 
   // Persist the user turn first — even if AI generation later fails, the
   // user's message is recorded so the conversation can resume.
-  appendMessage({
+  await appendMessage({
     conversationId,
     role: "user",
     textTarget: userTextTarget.trim(),
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   // Rebuild the message history for the model. AI sees the corrected
   // target-language text for user turns (not the raw transcript) so it
   // engages with what the user *meant*, not what they accidentally said.
-  const history = getMessages(conversationId);
+  const history = await getMessages(conversationId);
 
   const target = describeTargetLanguage(user.targetLanguage);
   const targetName = user.targetLanguage.language;
@@ -130,10 +130,10 @@ Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no
       throw new Error("Model returned no usable reply");
     }
     if (derivedTopic && needsTopic) {
-      updateConversationTopic(conversationId, derivedTopic);
+      await updateConversationTopic(conversationId, derivedTopic);
     }
 
-    appendMessage({
+    await appendMessage({
       conversationId,
       role: "ai",
       textTarget: text,

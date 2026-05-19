@@ -26,6 +26,6 @@ export async function GET(req: NextRequest) {
     limit = Math.min(Math.floor(parsed), MAX_LIMIT);
   }
 
-  const conversations = getRecentConversations(session.userId, limit);
+  const conversations = await getRecentConversations(session.userId, limit);
   return NextResponse.json({ conversations });
 }

@@ -18,7 +18,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { getDb } from "../lib/db";
+import { db } from "../lib/db";
+import { userVocab } from "../lib/schema";
+import { asc } from "drizzle-orm";
 import { getUserById } from "../lib/users";
 import { saveVocabEntry } from "../lib/vocabSave";
 
@@ -41,15 +43,18 @@ async function main() {
     process.exit(1);
   }
 
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT id, user_id, target_word_original, context_sentence,
-              english_description, native_translation, native_hint
-       FROM user_vocab
-       ORDER BY user_id, id`,
-    )
-    .all() as OldRow[];
+  const rows = (await db
+    .select({
+      id: userVocab.id,
+      user_id: userVocab.userId,
+      target_word_original: userVocab.targetWordOriginal,
+      context_sentence: userVocab.contextSentence,
+      english_description: userVocab.englishDescription,
+      native_translation: userVocab.nativeTranslation,
+      native_hint: userVocab.nativeHint,
+    })
+    .from(userVocab)
+    .orderBy(asc(userVocab.userId), asc(userVocab.id))) as OldRow[];
 
   console.log(
     `Found ${rows.length} rows across ${new Set(rows.map((r) => r.user_id)).size} user(s).`,
@@ -82,8 +87,8 @@ async function main() {
   }
 
   // Wipe — only the vocab table; users, conversations, etc. stay intact.
-  const del = db.prepare("DELETE FROM user_vocab").run();
-  console.log(`Deleted ${del.changes} rows.\n`);
+  const deleted = await db.delete(userVocab).returning({ id: userVocab.id });
+  console.log(`Deleted ${deleted.length} rows.\n`);
 
   let inserted = 0;
   let merged = 0;
@@ -91,7 +96,7 @@ async function main() {
   let failed = 0;
 
   for (const r of replayable) {
-    const user = getUserById(r.user_id);
+    const user = await getUserById(r.user_id);
     if (!user) {
       console.warn(`  user ${r.user_id} not found, skipping word "${r.target_word_original}"`);
       failed++;

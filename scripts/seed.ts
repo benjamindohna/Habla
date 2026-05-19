@@ -50,21 +50,21 @@ const SEED_USERS: SeedUser[] = [
   },
 ];
 
-function seed() {
+async function seed() {
   console.log("Seeding users…");
   for (const u of SEED_USERS) {
-    upsertUser({
+    await upsertUser({
       email: u.email,
       passwordHash: u.passwordHash,
       nativeLanguage: "German",
       level: u.level,
     });
-    const row = getUserByEmail(u.email);
+    const row = await getUserByEmail(u.email);
     if (!row) throw new Error(`Failed to find ${u.email} after upsert`);
-    setUserInterests(row.id, u.interests);
+    await setUserInterests(row.id, u.interests);
     console.log(`  ${u.email}  level=${u.level}  interests=${u.interests.length}`);
   }
   console.log("Done.");
 }
 
-seed();
+seed().catch((err) => { console.error(err); process.exit(1); });

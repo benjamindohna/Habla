@@ -15,7 +15,9 @@
 //   on collision:             2 LLM calls (description + cmp),  ~$0.000104
 //   most saves are typical → average is ~$0.00006
 
-import { getDb } from "./db";
+import { db } from "./db";
+import { userVocab } from "./schema";
+import { and, eq, sql } from "drizzle-orm";
 import { compareVocabDescriptions, generateVocabDescription, normalizeVocab } from "./vocab";
 import { rerankAfterInsert } from "./vocabRanking";
 import type { TargetLanguageSpec } from "./targetLanguage";
@@ -47,12 +49,6 @@ export type SaveVocabResult =
   | { action: "merged"; matchedRowId: number; matchedDescription: string }
   | { action: "polysemy_inserted"; rowId: number; description: string; siblingRowIds: number[] };
 
-interface ExistingRow {
-  id: number;
-  english_description: string;
-  stage: number;
-}
-
 const SOFT_LAPSE_COOLDOWN_SECONDS = 5 * 60; // 5 minutes per ROADMAP
 
 export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResult> {
@@ -71,65 +67,67 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
     native_language: args.native_language,
   });
 
-  const db = getDb();
-
   // Step 2: look up existing rows for this user with same target_word_lower.
-  const existing = db
-    .prepare(
-      `SELECT id, english_description, stage, last_seen
-       FROM user_vocab
-       WHERE user_id = ? AND target_word_lower = ?
-       ORDER BY id`,
-    )
-    .all(args.userId, lower) as Array<ExistingRow & { last_seen: number }>;
+  const existing = await db
+    .select({
+      id: userVocab.id,
+      englishDescription: userVocab.englishDescription,
+      stage: userVocab.stage,
+      lastSeen: userVocab.lastSeen,
+    })
+    .from(userVocab)
+    .where(and(eq(userVocab.userId, args.userId), eq(userVocab.targetWordLower, lower)))
+    .orderBy(userVocab.id);
 
   if (existing.length === 0) {
     // No collision → straight insert.
-    const result = db
-      .prepare(
-        `INSERT INTO user_vocab
-           (user_id, target_word_original, target_word_lower, english_description, context_sentence)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(args.userId, original, lower, description, args.context_sentence);
-    const rowId = Number(result.lastInsertRowid);
+    const [inserted] = await db
+      .insert(userVocab)
+      .values({
+        userId: args.userId,
+        targetWordOriginal: original,
+        targetWordLower: lower,
+        englishDescription: description,
+        contextSentence: args.context_sentence,
+      })
+      .returning({ id: userVocab.id });
+    const rowId = inserted.id;
     await rerankAfterInsert(args.userId, rowId);
     generateAssetsAsync(rowId, args.userId, original, args.context_sentence, args.native_language, args.targetLanguage);
-    return {
-      action: "inserted",
-      rowId,
-      description,
-    };
+    return { action: "inserted", rowId, description };
   }
 
   // Step 3: comparator decides synonym vs polysemy.
   const synonymIndex = await compareVocabDescriptions({
     target_word: original,
     new_description: description,
-    existing_descriptions: existing.map((r) => r.english_description),
+    existing_descriptions: existing.map((r) => r.englishDescription),
   });
 
   if (synonymIndex >= 0 && synonymIndex < existing.length) {
     // Synonym hit — discard the new entry, soft-lapse the matched row.
     // No rank change needed: the merged-into row keeps its rank.
     const matched = existing[synonymIndex];
-    softLapseIfDue(args.userId, matched.id);
+    await softLapseIfDue(args.userId, matched.id);
     return {
       action: "merged",
       matchedRowId: matched.id,
-      matchedDescription: matched.english_description,
+      matchedDescription: matched.englishDescription,
     };
   }
 
   // Different sense — insert as polyseme row.
-  const result = db
-    .prepare(
-      `INSERT INTO user_vocab
-         (user_id, target_word_original, target_word_lower, english_description, context_sentence)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run(args.userId, original, lower, description, args.context_sentence);
-  const rowId = Number(result.lastInsertRowid);
+  const [inserted] = await db
+    .insert(userVocab)
+    .values({
+      userId: args.userId,
+      targetWordOriginal: original,
+      targetWordLower: lower,
+      englishDescription: description,
+      contextSentence: args.context_sentence,
+    })
+    .returning({ id: userVocab.id });
+  const rowId = inserted.id;
   await rerankAfterInsert(args.userId, rowId);
   generateAssetsAsync(rowId, args.userId, original, args.context_sentence, args.native_language, args.targetLanguage);
   return {
@@ -164,20 +162,17 @@ function generateAssetsAsync(
       context_sentence: contextSentence,
       targetLanguage,
       native_language: nativeLanguage,
-    }).then((res) => {
-      getDb()
-        .prepare(
-          `UPDATE user_vocab SET native_translation = ?, native_hint = ?
-           WHERE id = ? AND user_id = ?`,
-        )
-        .run(res.translation, res.hint, rowId, userId);
+    }).then(async (res) => {
+      await db
+        .update(userVocab)
+        .set({ nativeTranslation: res.translation, nativeHint: res.hint })
+        .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
     }),
-    generateTts(targetWord, targetLanguage).then((buf) => {
-      getDb()
-        .prepare(
-          `UPDATE user_vocab SET tts_audio = ? WHERE id = ? AND user_id = ?`,
-        )
-        .run(buf, rowId, userId);
+    generateTts(targetWord, targetLanguage).then(async (buf) => {
+      await db
+        .update(userVocab)
+        .set({ ttsAudio: buf })
+        .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
     }),
   ]).then((results) => {
     for (const r of results) {
@@ -202,19 +197,16 @@ function generateAssetsAsync(
  * counter is a faithful tap-count for analytics, not gated by SRS
  * scheduling. last_seen is also always updated.
  */
-function softLapseIfDue(userId: number, rowId: number): void {
-  const db = getDb();
+async function softLapseIfDue(userId: number, rowId: number): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const cutoff = now - SOFT_LAPSE_COOLDOWN_SECONDS;
-  // Single round-trip: the CASE reads the OLD last_seen against cutoff,
-  // so the halving applies only when this tap is more than 5 minutes
-  // after the previous one. looked_up + last_seen are unconditional.
-  db.prepare(
-    `UPDATE user_vocab
-     SET stage          = CASE WHEN last_seen < ? THEN MAX(0, stage / 2)          ELSE stage          END,
-         stage_sentence = CASE WHEN last_seen < ? THEN MAX(0, stage_sentence / 2) ELSE stage_sentence END,
-         looked_up      = looked_up + 1,
-         last_seen      = ?
-     WHERE id = ? AND user_id = ?`,
-  ).run(cutoff, cutoff, now, rowId, userId);
+  await db
+    .update(userVocab)
+    .set({
+      stage: sql`CASE WHEN ${userVocab.lastSeen} < ${cutoff} THEN GREATEST(0, ${userVocab.stage} / 2) ELSE ${userVocab.stage} END`,
+      stageSentence: sql`CASE WHEN ${userVocab.lastSeen} < ${cutoff} THEN GREATEST(0, ${userVocab.stageSentence} / 2) ELSE ${userVocab.stageSentence} END`,
+      lookedUp: sql`${userVocab.lookedUp} + 1`,
+      lastSeen: now,
+    })
+    .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
 }

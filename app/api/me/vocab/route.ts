@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { saveVocabEntry } from "@/lib/vocabSave";
-import { getDb } from "@/lib/db";
+import { db } from "@/lib/db";
+import { userVocab } from "@/lib/schema";
+import { and, asc, eq } from "drizzle-orm";
 
 /**
  * Save a vocab entry. The AIBubble fires this fire-and-forget after
@@ -21,7 +23,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -64,16 +66,25 @@ export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const rows = getDb()
-    .prepare(
-      `SELECT id, target_word_original, target_word_lower, english_description,
-              context_sentence, stage, stage_sentence, next_due_at, correct_streak,
-              looked_up, last_seen, created_at, relevance_rank
-       FROM user_vocab
-       WHERE user_id = ?
-       ORDER BY relevance_rank ASC, id ASC`,
-    )
-    .all(session.userId);
+  const rows = await db
+    .select({
+      id: userVocab.id,
+      target_word_original: userVocab.targetWordOriginal,
+      target_word_lower: userVocab.targetWordLower,
+      english_description: userVocab.englishDescription,
+      context_sentence: userVocab.contextSentence,
+      stage: userVocab.stage,
+      stage_sentence: userVocab.stageSentence,
+      next_due_at: userVocab.nextDueAt,
+      correct_streak: userVocab.correctStreak,
+      looked_up: userVocab.lookedUp,
+      last_seen: userVocab.lastSeen,
+      created_at: userVocab.createdAt,
+      relevance_rank: userVocab.relevanceRank,
+    })
+    .from(userVocab)
+    .where(eq(userVocab.userId, session.userId))
+    .orderBy(asc(userVocab.relevanceRank), asc(userVocab.id));
   return NextResponse.json({ rows });
 }
 
@@ -93,10 +104,11 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
   }
 
-  const result = getDb()
-    .prepare("DELETE FROM user_vocab WHERE id = ? AND user_id = ?")
-    .run(id, session.userId);
-  if (result.changes === 0) {
+  const deleted = await db
+    .delete(userVocab)
+    .where(and(eq(userVocab.id, id), eq(userVocab.userId, session.userId)))
+    .returning({ id: userVocab.id });
+  if (deleted.length === 0) {
     return NextResponse.json({ error: "row not found" }, { status: 404 });
   }
   return NextResponse.json({ ok: true, deleted: id });

@@ -9,19 +9,11 @@
 // in the target language. The user's personal interests are intentionally
 // NOT factored in — at this stage we don't have stable interest signal,
 // and a pure linguistic-importance order is a good first approximation.
-//
-// Hallucination handling:
-//   bulk-sort: items the LLM omitted are inserted in the middle of the
-//              returned order; items the LLM hallucinated are ignored.
-//   binary-insert: malformed output → fall back to "between_BC" so the
-//              recursion converges toward the midpoint of the current
-//              search range.
-//
-// Cost: gpt-4o-mini, ~$0.0003 per bulk-sort call (≤15 items),
-// ~$0.0005 per save in binary-insert mode (~4 calls × $0.0001 each).
 
 import { chatJSON } from "./llm";
-import { getDb } from "./db";
+import { db } from "./db";
+import { userVocab } from "./schema";
+import { and, eq, gte, ne, sql } from "drizzle-orm";
 import { getUserById } from "./users";
 
 const BULK_SORT_THRESHOLD = 15;
@@ -33,23 +25,21 @@ interface VocabRow {
   relevance_rank: number;
 }
 
-/**
- * Re-rank the user's vocab list after a new row has been inserted.
- * Picks bulk-sort vs binary-insert automatically based on list size.
- */
 export async function rerankAfterInsert(userId: number, newRowId: number): Promise<void> {
-  const db = getDb();
-  const user = getUserById(userId);
+  const user = await getUserById(userId);
   if (!user) return;
   const targetName = user.targetLanguage.language;
-  const allRows = db
-    .prepare(
-      `SELECT id, target_word_original, english_description, relevance_rank
-       FROM user_vocab
-       WHERE user_id = ?
-       ORDER BY relevance_rank ASC, id ASC`,
-    )
-    .all(userId) as VocabRow[];
+  const rowsRaw = await db
+    .select({
+      id: userVocab.id,
+      target_word_original: userVocab.targetWordOriginal,
+      english_description: userVocab.englishDescription,
+      relevance_rank: userVocab.relevanceRank,
+    })
+    .from(userVocab)
+    .where(eq(userVocab.userId, userId))
+    .orderBy(userVocab.relevanceRank, userVocab.id);
+  const allRows = rowsRaw as VocabRow[];
 
   if (allRows.length === 0) return;
 
@@ -60,7 +50,7 @@ export async function rerankAfterInsert(userId: number, newRowId: number): Promi
     if (!newRow) return;
     const others = allRows.filter((r) => r.id !== newRowId);
     const insertionRank = await binaryInsert(newRow, others, targetName);
-    applyBinaryInsert(userId, newRowId, insertionRank);
+    await applyBinaryInsert(userId, newRowId, insertionRank);
   }
 }
 
@@ -104,9 +94,6 @@ Rules:
     ? (llmResult.sorted.filter((s) => typeof s === "string") as string[])
     : [];
 
-  // Match LLM-returned items back to rows by exact string. Hallucinated
-  // extras are silently ignored. Items the LLM forgot get inserted at the
-  // midpoint of the returned order so they're not arbitrarily ranked last.
   const itemToRow = new Map<string, VocabRow>();
   for (const r of rows) itemToRow.set(formatItem(r), r);
 
@@ -123,23 +110,24 @@ Rules:
 
   let finalOrder: VocabRow[];
   if (matched.length === 0) {
-    // Total LLM failure — leave ranks unchanged.
     console.warn("[vocab/bulkSort] LLM returned no matchable items, leaving ranks unchanged");
     return;
   } else if (missing.length === 0) {
     finalOrder = matched;
   } else {
-    // Splice missing rows into the middle of the matched ordering.
     const middle = Math.floor(matched.length / 2);
     finalOrder = [...matched.slice(0, middle), ...missing, ...matched.slice(middle)];
   }
 
-  const db = getDb();
-  const tx = db.transaction(() => {
-    const upd = db.prepare("UPDATE user_vocab SET relevance_rank = ? WHERE id = ? AND user_id = ?");
-    finalOrder.forEach((row, idx) => upd.run(idx, row.id, userId));
+  await db.transaction(async (tx) => {
+    for (let idx = 0; idx < finalOrder.length; idx++) {
+      const row = finalOrder[idx];
+      await tx
+        .update(userVocab)
+        .set({ relevanceRank: idx })
+        .where(and(eq(userVocab.id, row.id), eq(userVocab.userId, userId)));
+    }
   });
-  tx();
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -149,8 +137,6 @@ Rules:
 type AnchorPosition = "before_A" | "between_AB" | "between_BC" | "after_C";
 
 async function binaryInsert(newRow: VocabRow, sorted: VocabRow[], targetName: string): Promise<number> {
-  // sorted is the existing list (without newRow), in importance order.
-  // Returns the insertion position 0..sorted.length.
   let lo = 0;
   let hi = sorted.length;
 
@@ -159,7 +145,7 @@ async function binaryInsert(newRow: VocabRow, sorted: VocabRow[], targetName: st
     const aIdx = lo + Math.floor(range / 4);
     const bIdx = lo + Math.floor(range / 2);
     const cIdx = lo + Math.floor((range * 3) / 4);
-    if (aIdx >= bIdx || bIdx >= cIdx) break; // degenerate range
+    if (aIdx >= bIdx || bIdx >= cIdx) break;
     const position = await compareToAnchors(newRow, sorted[aIdx], sorted[bIdx], sorted[cIdx], targetName);
     switch (position) {
       case "before_A":
@@ -178,8 +164,6 @@ async function binaryInsert(newRow: VocabRow, sorted: VocabRow[], targetName: st
         break;
     }
   }
-  // Final insertion: midpoint of the remaining range. Up to 3 positions
-  // of imprecision, fine for a list of N>15.
   return lo + Math.floor((hi - lo) / 2);
 }
 
@@ -219,39 +203,33 @@ Output ONLY valid JSON:
       temperature: 0,
     });
     const pos = result.position;
-    if (
-      pos === "before_A" ||
-      pos === "between_AB" ||
-      pos === "between_BC" ||
-      pos === "after_C"
-    ) {
+    if (pos === "before_A" || pos === "between_AB" || pos === "between_BC" || pos === "after_C") {
       return pos;
     }
   } catch (err) {
     console.warn("[vocab/binaryInsert] LLM call failed, defaulting to between_BC:", err);
   }
-  // Fallback: between_BC nudges the recursion toward the midpoint.
   return "between_BC";
 }
 
-function applyBinaryInsert(userId: number, newRowId: number, insertionRank: number): void {
-  const db = getDb();
-  const tx = db.transaction(() => {
-    // Shift existing rows at or after the insertion rank up by 1.
-    db.prepare(
-      `UPDATE user_vocab
-       SET relevance_rank = relevance_rank + 1
-       WHERE user_id = ? AND relevance_rank >= ? AND id != ?`,
-    ).run(userId, insertionRank, newRowId);
-    // Place the new row at the chosen rank.
-    db.prepare(
-      `UPDATE user_vocab SET relevance_rank = ? WHERE id = ? AND user_id = ?`,
-    ).run(insertionRank, newRowId, userId);
+async function applyBinaryInsert(userId: number, newRowId: number, insertionRank: number): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(userVocab)
+      .set({ relevanceRank: sql`${userVocab.relevanceRank} + 1` })
+      .where(
+        and(
+          eq(userVocab.userId, userId),
+          gte(userVocab.relevanceRank, insertionRank),
+          ne(userVocab.id, newRowId),
+        ),
+      );
+    await tx
+      .update(userVocab)
+      .set({ relevanceRank: insertionRank })
+      .where(and(eq(userVocab.id, newRowId), eq(userVocab.userId, userId)));
   });
-  tx();
 }
-
-// ─────────────────────────────────────────────────────────────────────────
 
 function formatItem(row: VocabRow): string {
   return `${row.target_word_original} — ${row.english_description}`;

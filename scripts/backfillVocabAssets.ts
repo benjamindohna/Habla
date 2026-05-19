@@ -1,19 +1,12 @@
 // One-shot backfill: pre-generate native_translation, native_hint, and
-// tts_audio for every user_vocab row that's missing any of them. Run
-// once after migration 0006 is applied; future inserts trigger
-// generation automatically via vocabSave.
+// tts_audio for every user_vocab row that's missing any of them.
 //
 // Usage:
 //   npm run backfill-vocab-assets
-//
-// Concurrency capped at 4 to stay polite with OpenAI rate limits.
-// Cost roughly $0.0016 per row (~$0.05 for 30 rows).
-//
-// Run with the dev server stopped — better-sqlite3 in WAL mode tolerates
-// concurrent reads but write contention with a long-running server is
-// avoidable.
 
-import { getDb } from "../lib/db";
+import { db } from "../lib/db";
+import { userVocab } from "../lib/schema";
+import { asc, eq, isNull, or } from "drizzle-orm";
 import { generateExplanation } from "../lib/vocabExplain";
 import { generateTts } from "../lib/vocabTts";
 import { getUserById } from "../lib/users";
@@ -31,7 +24,7 @@ interface Row {
 const CONCURRENCY = 4;
 
 async function backfillRow(row: Row): Promise<{ id: number; explainOk: boolean; ttsOk: boolean }> {
-  const user = getUserById(row.user_id);
+  const user = await getUserById(row.user_id);
   if (!user) {
     console.warn(`  row ${row.id}: user ${row.user_id} not found, skipping`);
     return { id: row.id, explainOk: false, ttsOk: false };
@@ -52,12 +45,10 @@ async function backfillRow(row: Row): Promise<{ id: number; explainOk: boolean; 
             targetLanguage: user.targetLanguage,
             native_language: user.nativeLanguage,
           });
-          getDb()
-            .prepare(
-              `UPDATE user_vocab SET native_translation = ?, native_hint = ?
-               WHERE id = ?`,
-            )
-            .run(res.translation, res.hint, row.id);
+          await db
+            .update(userVocab)
+            .set({ nativeTranslation: res.translation, nativeHint: res.hint })
+            .where(eq(userVocab.id, row.id));
         } catch (err) {
           explainOk = false;
           console.warn(`  row ${row.id} explain failed:`, (err as Error).message);
@@ -71,9 +62,7 @@ async function backfillRow(row: Row): Promise<{ id: number; explainOk: boolean; 
       (async () => {
         try {
           const buf = await generateTts(row.target_word_original, user.targetLanguage);
-          getDb()
-            .prepare(`UPDATE user_vocab SET tts_audio = ? WHERE id = ?`)
-            .run(buf, row.id);
+          await db.update(userVocab).set({ ttsAudio: buf }).where(eq(userVocab.id, row.id));
         } catch (err) {
           ttsOk = false;
           console.warn(`  row ${row.id} tts failed:`, (err as Error).message);
@@ -87,18 +76,26 @@ async function backfillRow(row: Row): Promise<{ id: number; explainOk: boolean; 
 }
 
 async function main() {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT id, user_id, target_word_original, context_sentence,
-              native_translation, native_hint, tts_audio
-       FROM user_vocab
-       WHERE native_translation IS NULL
-          OR native_hint IS NULL
-          OR tts_audio IS NULL
-       ORDER BY id`,
+  const rowsRaw = await db
+    .select({
+      id: userVocab.id,
+      user_id: userVocab.userId,
+      target_word_original: userVocab.targetWordOriginal,
+      context_sentence: userVocab.contextSentence,
+      native_translation: userVocab.nativeTranslation,
+      native_hint: userVocab.nativeHint,
+      tts_audio: userVocab.ttsAudio,
+    })
+    .from(userVocab)
+    .where(
+      or(
+        isNull(userVocab.nativeTranslation),
+        isNull(userVocab.nativeHint),
+        isNull(userVocab.ttsAudio),
+      ),
     )
-    .all() as Row[];
+    .orderBy(asc(userVocab.id));
+  const rows = rowsRaw as Row[];
 
   if (rows.length === 0) {
     console.log("All rows already have assets — nothing to do.");

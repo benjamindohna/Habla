@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
-import { getDb } from "@/lib/db";
+import { db } from "@/lib/db";
+import { userVocab } from "@/lib/schema";
+import { and, eq } from "drizzle-orm";
 import { generateTts } from "@/lib/vocabTts";
 
 /**
  * Returns the TTS audio for a vocab card's target word. Cache-aware:
- * cached blob → return directly (~5 ms). Cache miss → generate via
- * OpenAI TTS, persist on the row, return.
- *
- * Response is audio/mpeg (NOT JSON). The client treats it as a blob
- * and plays it via the Audio API.
+ * cached blob → return directly. Cache miss → generate via OpenAI TTS,
+ * persist on the row, return.
  */
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  const user = getUserById(session.userId);
+  const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as { rowId?: number };
@@ -24,40 +23,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "rowId required" }, { status: 400 });
   }
 
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT id, target_word_original, tts_audio
-       FROM user_vocab WHERE id = ? AND user_id = ?`,
-    )
-    .get(rowId, session.userId) as
-    | { id: number; target_word_original: string; tts_audio: Buffer | null }
-    | undefined;
+  const rows = await db
+    .select({
+      id: userVocab.id,
+      targetWordOriginal: userVocab.targetWordOriginal,
+      ttsAudio: userVocab.ttsAudio,
+    })
+    .from(userVocab)
+    .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, session.userId)))
+    .limit(1);
+  const row = rows[0];
   if (!row) {
     return NextResponse.json({ error: "Card not found" }, { status: 404 });
   }
 
-  // Cache hit: serve the stored blob.
-  if (row.tts_audio && row.tts_audio.length > 0) {
-    return new NextResponse(new Uint8Array(row.tts_audio), {
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Cache-Control": "no-store",
-      },
+  if (row.ttsAudio && row.ttsAudio.length > 0) {
+    return new NextResponse(new Uint8Array(row.ttsAudio), {
+      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" },
     });
   }
 
-  // Cache miss: generate, persist, return.
   try {
-    const buffer = await generateTts(row.target_word_original, user.targetLanguage);
-    db.prepare(
-      `UPDATE user_vocab SET tts_audio = ? WHERE id = ? AND user_id = ?`,
-    ).run(buffer, row.id, session.userId);
+    const buffer = await generateTts(row.targetWordOriginal, user.targetLanguage);
+    await db
+      .update(userVocab)
+      .set({ ttsAudio: buffer })
+      .where(and(eq(userVocab.id, row.id), eq(userVocab.userId, session.userId)));
     return new NextResponse(new Uint8Array(buffer), {
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Cache-Control": "no-store",
-      },
+      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" },
     });
   } catch (err) {
     console.error("[/api/vocab/tts]", err);
