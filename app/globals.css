@@ -2,49 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── iOS / Capacitor adjustments ──────────────────────────────────────
+/* ── iOS / Capacitor safe-area handling ──────────────────────────────
  * The WebView paints behind the Dynamic Island and the home indicator
- * (viewport-fit=cover in layout.tsx). Goal: content never goes under
- * those system zones AND the page can't be rubber-band-scrolled to
- * expose empty space behind them.
+ * (viewport-fit=cover in layout.tsx). We push content out of those
+ * zones via safe-area insets, with a hardcoded fallback in case the
+ * env() variables come back empty (some WebView contexts / older
+ * iPhones).
  *
- * Strategy: lock html+body to the exact viewport height with
- * `overflow: hidden`, so the OUTER document never scrolls. The
- * single immediate child <main> of each page becomes the scroll
- * container — Tailwind's min-h-screen on those <main> tags already
- * gives them a height anchor, and we override to make them scroll
- * their own content if it overflows. Safe-area insets are applied
- * to <main> not body, so the scroll container's content stays out
- * of the Dynamic Island / home indicator.
+ * Structure:
+ *   html  → fills the viewport, no scroll
+ *   body  → fills html, no scroll, padded by safe-area-insets so its
+ *           INNER content area is exactly the usable screen area
+ *   main  → fills the body's content area; scrolls internally if its
+ *           page content overflows
  *
- * Inner scroll containers (chat history, vocab queue) keep their
- * own overflow rules and behave normally — they live inside <main>.
+ * box-sizing: border-box on body makes the padding count INSIDE the
+ * 100% height — without it, body would be viewport + padding tall
+ * and we'd be right back at the original overscroll problem.
+ *
+ * The `max(env(...), 60px)` fallback: 60px covers the Dynamic Island
+ * area on modern iPhones in portrait; env() reports the real value
+ * when the WebView resolves it, otherwise the 60px floor kicks in.
+ * Similar reasoning for the 20px home-indicator bottom inset.
  */
+
 html, body {
   overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
   margin: 0;
   padding: 0;
+}
+
+html {
   height: 100%;
   overflow: hidden;
 }
 
+body {
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding-top: max(env(safe-area-inset-top), 60px);
+  padding-bottom: max(env(safe-area-inset-bottom), 20px);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* The scroll container is the single <main> immediate child. Pages
+ * use Tailwind's min-h-screen / h-screen for their own layout; with
+ * the body now padded to the usable area, those are equivalent to
+ * the area between the Dynamic Island and home indicator. */
 body > main {
   height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  /* Safe-area insets are content-area padding so it never goes under
-   * the Dynamic Island / Home Indicator. Background colour comes from
-   * Tailwind classes on the body / main already. */
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
-  box-sizing: border-box;
 }
-
-/* Some pages (chat) intentionally use h-screen on their <main> to
- * lock the layout and put scroll on an inner div. For those pages
- * the rule above already makes <main> exactly viewport height; the
- * inner scrolling continues to work because the inner div still has
- * its own overflow-y:auto. */
