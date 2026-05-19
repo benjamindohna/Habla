@@ -28,9 +28,11 @@ const config: CapacitorConfig = {
     allowNavigation: ["*.vercel.app", "*.habla.app"],
   },
   ios: {
-    contentInset: "always",
-    // Keep the keyboard from pushing content up too aggressively —
-    // we have our own scroll handling.
+    // "never" → let the web app's CSS handle insets via
+    // env(safe-area-inset-*). With "always", Capacitor adds its own
+    // top inset which combined with CSS double-pads the WebView and
+    // makes the whole page scrollable into the Dynamic Island region.
+    contentInset: "never",
     scrollEnabled: true,
   },
 };
