@@ -70,7 +70,7 @@ async function backfillRow(row: Row): Promise<{ id: number; explainOk: boolean; 
     tasks.push(
       (async () => {
         try {
-          const buf = await generateTts(row.target_word_original);
+          const buf = await generateTts(row.target_word_original, user.targetLanguage);
           getDb()
             .prepare(`UPDATE user_vocab SET tts_audio = ? WHERE id = ?`)
             .run(buf, row.id);

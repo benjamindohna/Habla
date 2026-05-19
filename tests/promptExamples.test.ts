@@ -24,6 +24,11 @@ describe("getPromptExamples — Spanish", () => {
   it("articles enumerate Spanish definite + indefinite", () => {
     assert.deepEqual(ex.articles, ["el", "la", "los", "las", "un", "una", "unos", "unas"]);
   });
+
+  it("ttsInstructions mention Castellano / distinción", () => {
+    assert.match(ex.ttsInstructions, /Castilian|Castellano/);
+    assert.match(ex.ttsInstructions, /distinción/);
+  });
 });
 
 describe("getPromptExamples — French", () => {
@@ -47,6 +52,16 @@ describe("getPromptExamples — French", () => {
     assert.ok(ex.articles.includes("un"));
     assert.ok(ex.articles.includes("une"));
     assert.ok(ex.articles.includes("des"));
+  });
+
+  it("ttsInstructions mention metropolitan French + uvular /ʁ/", () => {
+    assert.match(ex.ttsInstructions, /metropolitan|standard hexagonal|Parisian/i);
+    assert.match(ex.ttsInstructions, /\/ʁ\//);
+  });
+
+  it("ttsInstructions differ between Spanish and French", () => {
+    const sp = getPromptExamples(SPANISH);
+    assert.notEqual(sp.ttsInstructions, ex.ttsInstructions);
   });
 });
 

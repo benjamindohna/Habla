@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { getUserById } from "@/lib/users";
 import { getDb } from "@/lib/db";
 import { generateTts } from "@/lib/vocabTts";
 
@@ -14,6 +15,8 @@ import { generateTts } from "@/lib/vocabTts";
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const user = getUserById(session.userId);
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as { rowId?: number };
   const { rowId } = body;
@@ -46,7 +49,7 @@ export async function POST(req: NextRequest) {
 
   // Cache miss: generate, persist, return.
   try {
-    const buffer = await generateTts(row.target_word_original);
+    const buffer = await generateTts(row.target_word_original, user.targetLanguage);
     db.prepare(
       `UPDATE user_vocab SET tts_audio = ? WHERE id = ? AND user_id = ?`,
     ).run(buffer, row.id, session.userId);

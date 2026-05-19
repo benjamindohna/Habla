@@ -21,6 +21,11 @@ export interface PromptExamples {
    *  on-tap translate prompt to know which articles to bundle with the
    *  following noun, and by the sentence judge for article-tolerance. */
   articles: readonly string[];
+  /** Instruction block passed to the TTS model. Tells the synthesizer
+   *  which language + accent / regional pronunciation to use. The chat
+   *  TTS route additionally appends a coverage clause; this field is
+   *  the language-specific bit. */
+  ttsInstructions: string;
 }
 
 const SPANISH: PromptExamples = {
@@ -39,6 +44,10 @@ const SPANISH: PromptExamples = {
   ],
   greetingFrame: (verb) => `Hola, ¿de qué quieres ${verb} hoy?`,
   articles: ["el", "la", "los", "las", "un", "una", "unos", "unas"],
+  ttsInstructions:
+    `Pronounce the Spanish text clearly, at a natural pace suitable for a learner. ` +
+    `Use a clear Castilian (Castellano, peninsular Spanish) accent — the distinción: pronounce "c" before e or i, and "z", as the /θ/ sound (the "th" in English "thin"). Concrete examples: Barcelona → "Barthelona", cinco → "thinco", zapato → "thapato", gracias → "grathias". ` +
+    `Use Iberian intonation and rhythm — crisp consonants, the typical Madrid/Castilla cadence. Friendly, conversational, not declamatory.`,
 };
 
 const FRENCH: PromptExamples = {
@@ -55,6 +64,10 @@ const FRENCH: PromptExamples = {
   ],
   greetingFrame: (verb) => `Salut, de quoi veux-tu ${verb} aujourd'hui ?`,
   articles: ["le", "la", "les", "l'", "un", "une", "des"],
+  ttsInstructions:
+    `Pronounce the French text clearly, at a natural pace suitable for a learner. ` +
+    `Use a standard metropolitan French accent (Parisian / standard hexagonal French). Pronounce silent letters as silent, apply liaison naturally where required, and use the uvular /ʁ/ for the letter "r". ` +
+    `Use natural French intonation and rhythm — equal syllable stress, slight rise at the end of declarative phrases, melodic phrasing. Friendly, conversational, not declamatory.`,
 };
 
 const PROMPT_EXAMPLES_BY_LANGUAGE: Record<string, PromptExamples> = {

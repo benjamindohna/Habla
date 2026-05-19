@@ -172,7 +172,7 @@ function generateAssetsAsync(
         )
         .run(res.translation, res.hint, rowId, userId);
     }),
-    generateTts(targetWord).then((buf) => {
+    generateTts(targetWord, targetLanguage).then((buf) => {
       getDb()
         .prepare(
           `UPDATE user_vocab SET tts_audio = ? WHERE id = ? AND user_id = ?`,
