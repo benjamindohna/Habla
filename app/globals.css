@@ -4,30 +4,47 @@
 
 /* ── iOS / Capacitor adjustments ──────────────────────────────────────
  * The WebView paints behind the Dynamic Island and the home indicator
- * (viewport-fit=cover in layout.tsx). Use env(safe-area-inset-*) to
- * push content out of those zones so it never overlaps system UI.
+ * (viewport-fit=cover in layout.tsx). Goal: content never goes under
+ * those system zones AND the page can't be rubber-band-scrolled to
+ * expose empty space behind them.
  *
- * `overscroll-behavior: none` on html+body prevents the iOS "rubber
- * band" effect where the entire page can be dragged up to expose
- * empty space underneath the Dynamic Island. Inner scroll containers
- * (chat history, vocab queue) keep their own scroll naturally because
- * they specify their own overflow rules.
+ * Strategy: lock html+body to the exact viewport height with
+ * `overflow: hidden`, so the OUTER document never scrolls. The
+ * single immediate child <main> of each page becomes the scroll
+ * container — Tailwind's min-h-screen on those <main> tags already
+ * gives them a height anchor, and we override to make them scroll
+ * their own content if it overflows. Safe-area insets are applied
+ * to <main> not body, so the scroll container's content stays out
+ * of the Dynamic Island / home indicator.
+ *
+ * Inner scroll containers (chat history, vocab queue) keep their
+ * own overflow rules and behave normally — they live inside <main>.
  */
 html, body {
   overscroll-behavior: none;
-  /* Prevent text resize on iPhone rotation (only relevant if rotation
-   * is ever allowed; harmless otherwise). */
   -webkit-text-size-adjust: 100%;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
-body {
+body > main {
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Safe-area insets are content-area padding so it never goes under
+   * the Dynamic Island / Home Indicator. Background colour comes from
+   * Tailwind classes on the body / main already. */
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
-  /* Lock the body to viewport height so it can't scroll above/below.
-   * Inner scrollable areas (e.g. the chat message stream) still scroll
-   * because they have their own overflow:auto. */
-  min-height: 100vh;
-  min-height: 100dvh;
+  box-sizing: border-box;
 }
+
+/* Some pages (chat) intentionally use h-screen on their <main> to
+ * lock the layout and put scroll on an inner div. For those pages
+ * the rule above already makes <main> exactly viewport height; the
+ * inner scrolling continues to work because the inner div still has
+ * its own overflow-y:auto. */
