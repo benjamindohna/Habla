@@ -4,10 +4,8 @@ import {
   getUserById,
   getUserInterests,
   setUserCorrectionStyle,
-  setUserTargetLanguage,
   type CorrectionStyle,
 } from "@/lib/users";
-import type { TargetLanguageSpec } from "@/lib/targetLanguage";
 
 export async function GET() {
   const session = await getSession();
@@ -40,33 +38,17 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const body = (await req.json().catch(() => ({}))) as {
-    correctionStyle?: string;
-    targetLanguage?: TargetLanguageSpec;
-  };
-
-  if (body.correctionStyle !== undefined) {
-    const next = body.correctionStyle;
-    if (next !== "natural" && next !== "transcript_aware") {
-      return NextResponse.json({ error: "Invalid correctionStyle" }, { status: 400 });
-    }
-    setUserCorrectionStyle(session.userId, next as CorrectionStyle);
-    return NextResponse.json({ ok: true, correctionStyle: next });
+  // target_language is intentionally NOT patchable post-creation: the
+  // current data model scopes vocab / topics / conversations per user,
+  // not per (user, language), so switching mid-session would mix
+  // French vocab into Spanish reviews etc. Adding switching support
+  // requires the per-language scoping refactor first.
+  const body = (await req.json().catch(() => ({}))) as { correctionStyle?: string };
+  const next = body.correctionStyle;
+  if (next !== "natural" && next !== "transcript_aware") {
+    return NextResponse.json({ error: "Invalid correctionStyle" }, { status: 400 });
   }
 
-  if (body.targetLanguage !== undefined) {
-    const spec = body.targetLanguage;
-    if (
-      !spec ||
-      typeof spec.language !== "string" ||
-      (spec.location !== null && typeof spec.location !== "string") ||
-      (spec.style !== "everyday" && spec.style !== "street" && spec.style !== "office")
-    ) {
-      return NextResponse.json({ error: "Invalid targetLanguage" }, { status: 400 });
-    }
-    setUserTargetLanguage(session.userId, spec);
-    return NextResponse.json({ ok: true, targetLanguage: spec });
-  }
-
-  return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+  setUserCorrectionStyle(session.userId, next as CorrectionStyle);
+  return NextResponse.json({ ok: true, correctionStyle: next });
 }

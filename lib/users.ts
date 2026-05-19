@@ -93,12 +93,6 @@ export function upsertUser(input: {
   return user;
 }
 
-export function setUserTargetLanguage(userId: number, spec: TargetLanguageSpec): void {
-  getDb()
-    .prepare("UPDATE users SET target_language_json = ? WHERE id = ?")
-    .run(JSON.stringify(spec), userId);
-}
-
 export function getUserInterests(userId: number): string[] {
   const db = getDb();
   const rows = db
