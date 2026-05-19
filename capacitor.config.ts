@@ -22,7 +22,7 @@ const config: CapacitorConfig = {
   // http://192.168.x.x:3000 to load a local dev server on-device
   // (set `cleartext: true` for local non-HTTPS).
   server: {
-    url: "https://habla-six.vercel.app",
+    url: "https://habla-three.vercel.app",
     // Allows the WebView to make requests to other origins (OpenAI,
     // Vercel custom domain etc.). Without this you'd hit CORS issues.
     allowNavigation: ["*.vercel.app", "*.habla.app"],
