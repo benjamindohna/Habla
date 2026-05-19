@@ -17,3 +17,8 @@ data/
 
 # TypeScript incremental build cache
 tsconfig.tsbuildinfo
+# Capacitor / iOS build artefacts
+ios/App/Pods/
+ios/App/build/
+ios/App/Podfile.lock
+ios/.gradle/
