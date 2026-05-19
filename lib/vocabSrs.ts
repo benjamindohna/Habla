@@ -46,10 +46,16 @@ export async function getDueVocabQueue(
 ): Promise<DueVocabRow[]> {
   const now = Math.floor(Date.now() / 1000);
   const stageCol = stageColumnExpr(mode);
-  const caseClauses = STAGE_INTERVALS_SECONDS
-    .map((seconds, stage) => sql`WHEN ${stage} THEN ${seconds}`)
-    .reduce((acc, clause) => sql`${acc} ${clause}`, sql``);
-  const intervalExpr = sql`CASE ${stageCol} ${caseClauses} ELSE ${STAGE_INTERVALS_SECONDS[MAX_STAGE]} END`;
+  // Build CASE expression with INLINE integer literals (sql.raw) — when
+  // both the WHEN and THEN branches go through Postgres as `$N` text
+  // parameters the result type can't be inferred and the surrounding
+  // `last_seen + (...)` fails as `integer + text`. STAGE_INTERVALS_SECONDS
+  // is a static module-level constant, no injection risk.
+  const caseBody = STAGE_INTERVALS_SECONDS
+    .map((seconds, stage) => `WHEN ${stage} THEN ${seconds}`)
+    .join(" ");
+  const fallback = STAGE_INTERVALS_SECONDS[MAX_STAGE];
+  const intervalExpr = sql`CASE ${stageCol} ${sql.raw(caseBody)} ELSE ${sql.raw(String(fallback))} END`;
   const rows = await db
     .select({
       id: userVocab.id,
