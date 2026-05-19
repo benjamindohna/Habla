@@ -454,12 +454,12 @@ export default function ConversationView({
                   </span>
                 </button>
 
-                {/* Speech-bubble picker anchored to the Thema button. The
+                {/* Speech-bubble picker centred over the Thema button. The
                     tail is drawn with two stacked triangles (outer = border
                     colour, inner = bg) so the border shows through. */}
                 {topicPickerOpen && (
                   <div
-                    className="absolute bottom-full right-0 mb-3 z-20 w-72 rounded-xl border border-neutral-200 bg-white shadow-lg p-3"
+                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 z-20 w-72 rounded-xl border border-neutral-200 bg-white shadow-lg p-3"
                     role="dialog"
                     aria-label="Themen-Empfehlungen"
                   >
@@ -485,9 +485,14 @@ export default function ConversationView({
                             onClick={() => handleTopicPick(t)}
                             disabled={pickingTopic !== null || rerolling}
                             title={t.target}
-                            className="aspect-square rounded-md border border-neutral-200 bg-white hover:border-neutral-400 hover:bg-neutral-50 transition-colors text-[10px] leading-tight text-neutral-700 px-1.5 py-1 flex items-center justify-center text-center disabled:opacity-40 disabled:cursor-not-allowed line-clamp-4"
+                            className="group aspect-square rounded-md border border-neutral-200 bg-white hover:border-neutral-400 hover:bg-neutral-50 transition-colors text-[10px] leading-tight px-1.5 py-1 flex items-center justify-center text-center disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            {t.target}
+                            <span className="line-clamp-4 text-neutral-700 group-hover:hidden">
+                              {t.target}
+                            </span>
+                            <span className="hidden line-clamp-4 text-neutral-400 italic group-hover:inline">
+                              {t.native}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -502,15 +507,15 @@ export default function ConversationView({
                     )}
 
                     {/* Tail: 8px triangle, outline + inner fill so it
-                        matches the bubble's border. Positioned right-side
-                        to point at the Thema button below. */}
+                        matches the bubble's border. Centred to point at
+                        the Thema button below. */}
                     <span
                       aria-hidden="true"
-                      className="absolute -bottom-[7px] right-6 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-neutral-200"
+                      className="absolute -bottom-[7px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-neutral-200"
                     />
                     <span
                       aria-hidden="true"
-                      className="absolute -bottom-[6px] right-6 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-white"
+                      className="absolute -bottom-[6px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-white"
                     />
                   </div>
                 )}
