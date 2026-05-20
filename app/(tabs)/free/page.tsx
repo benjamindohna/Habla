@@ -165,7 +165,11 @@ export default function FreeInputPage() {
         )}
 
         <div className="flex flex-col items-center gap-3">
-          <AudioRecorder onRecordingComplete={handleRecordingComplete} disabled={isProcessing} />
+          <AudioRecorder
+            onRecordingComplete={handleRecordingComplete}
+            onRecordingStart={resetForNext}
+            disabled={isProcessing}
+          />
           {stage.kind === "ready" && stage.result && (
             <button
               onClick={resetForNext}

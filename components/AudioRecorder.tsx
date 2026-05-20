@@ -6,10 +6,14 @@ type RecorderState = "idle" | "recording";
 
 interface AudioRecorderProps {
   onRecordingComplete: (blob: Blob) => void;
+  /** Fires when the user taps Record and the stream is acquired.
+   *  Lets parents clear stale UI (e.g. the previous correction block
+   *  on the Frei tab) at the moment recording begins. */
+  onRecordingStart?: () => void;
   disabled?: boolean;
 }
 
-export default function AudioRecorder({ onRecordingComplete, disabled }: AudioRecorderProps) {
+export default function AudioRecorder({ onRecordingComplete, onRecordingStart, disabled }: AudioRecorderProps) {
   const [state, setState] = useState<RecorderState>("idle");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -33,6 +37,7 @@ export default function AudioRecorder({ onRecordingComplete, disabled }: AudioRe
     recorder.start(250); // collect a chunk every 250ms so we always get real audio data
     mediaRecorderRef.current = recorder;
     setState("recording");
+    onRecordingStart?.();
   }
 
   function stopRecording() {
