@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AudioRecorder from "@/components/AudioRecorder";
 import CorrectionBlock from "@/components/CorrectionBlock";
+import InterpretationLine from "@/components/InterpretationLine";
 import type { CorrectionResult } from "@/types/correction";
 
 type CorrectionStyle = "natural" | "transcript_aware";
@@ -41,6 +42,7 @@ async function correctTranscript(args: {
   transcript: string;
   nativeLanguage: string;
   style: CorrectionStyle;
+  overrideIntendedMeaning?: string;
 }): Promise<CorrectionResult> {
   const res = await fetch("/api/correct", {
     method: "POST",
@@ -91,6 +93,26 @@ export default function FreeInputPage() {
     }
   }
 
+  // Re-run correction with the user's edited interpretation. Reuses the
+  // raw transcript already on the result so we don't need to re-record;
+  // the API skips the interpret step when overrideIntendedMeaning is set.
+  async function handleReCorrect(override: string) {
+    if (!me || stage.kind !== "ready" || !stage.result) return;
+    const transcript = stage.result.transcript_raw;
+    setStage({ kind: "correcting", transcript });
+    try {
+      const result = await correctTranscript({
+        transcript,
+        nativeLanguage: me.nativeLanguage,
+        style: me.correctionStyle,
+        overrideIntendedMeaning: override,
+      });
+      setStage({ kind: "ready", result });
+    } catch (err) {
+      setStage({ kind: "error", message: (err as Error).message });
+    }
+  }
+
   function resetForNext() {
     setStage({ kind: "ready", result: null });
   }
@@ -116,7 +138,12 @@ export default function FreeInputPage() {
         </p>
 
         {stage.kind === "ready" && stage.result && (
-          <div className="mb-6">
+          <div className="mb-6 space-y-3">
+            <InterpretationLine
+              interpretation={stage.result.intended_meaning_native}
+              onReCorrect={handleReCorrect}
+              align="left"
+            />
             <CorrectionBlock
               result={stage.result}
               nativeLanguage={me.nativeLanguage}
