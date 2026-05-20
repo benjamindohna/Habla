@@ -1,6 +1,8 @@
-// Server-rendered vocab menu. The user's language labels are filled in
-// on the server during the render, so the page arrives at the browser
-// with no loading flicker. No client-side hydration / fetching needed.
+// Vocab tab — menu to pick between recognition (Übersetzen) and
+// production (Anwenden) practice modes. Server-rendered: labels for
+// "Französisch → Deutsch erkennen" / "Spanisch → ..." are filled in
+// at render time using the user's stored target + native language,
+// so the page arrives with no loading flicker.
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -18,16 +20,7 @@ export default async function VocabMenuPage() {
   const nativeLabel = languageLabel(user.nativeLanguage, user.nativeLanguage);
 
   return (
-    <main className="flex min-h-screen flex-col items-center px-4 py-8">
-      <div className="w-full max-w-xl flex items-center mb-12">
-        <Link
-          href="/"
-          className="text-xs text-neutral-500 hover:text-neutral-800 transition-colors"
-        >
-          ← Home
-        </Link>
-      </div>
-
+    <div className="flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-md flex flex-col items-stretch gap-3 mt-8">
         <h1 className="text-2xl font-semibold tracking-tight text-center mb-4">
           Vokabeln lernen
@@ -51,6 +44,6 @@ export default async function VocabMenuPage() {
           </span>
         </Link>
       </div>
-    </main>
+    </div>
   );
 }

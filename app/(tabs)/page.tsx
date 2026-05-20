@@ -1,5 +1,11 @@
 "use client";
 
+// Chat tab — the primary entry into a conversation. Lists recent
+// chats, lets the user start a new one. The "Vokabeln lernen" button
+// of the old homepage is now reachable via the bottom-nav "Lernen"
+// tab; the Datenschutz link is removed because the tab nav owns
+// global navigation and Datenschutz lives in a separate route.
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -44,7 +50,7 @@ function relativeTime(unixSeconds: number): string {
   });
 }
 
-export default function Page() {
+export default function ChatTabPage() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [starting, setStarting] = useState(false);
@@ -119,14 +125,14 @@ export default function Page() {
 
   if (!me) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
+      <div className="flex h-full items-center justify-center">
         <p className="text-sm text-neutral-400">Loading…</p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center px-4 py-8">
+    <div className="flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-xl flex items-center justify-between mb-12">
         <label className="flex items-center gap-2 text-xs text-neutral-400">
           Correction style
@@ -194,16 +200,10 @@ export default function Page() {
         >
           {starting ? "Starte…" : "Neuen Chat starten"}
         </button>
-        <button
-          onClick={() => router.push("/vocab")}
-          className="w-full px-6 py-5 rounded-2xl border border-neutral-200 bg-white text-neutral-900 text-base font-medium hover:border-neutral-400 transition-colors"
-        >
-          Vokabeln lernen
-        </button>
       </div>
 
       {recents !== null && recents.length > 0 && (
-        <div className="w-full max-w-md mt-12 mb-12">
+        <div className="w-full max-w-md mt-12 mb-4">
           <p className="text-xs uppercase tracking-wider text-neutral-400 mb-3">Letzte Chats</p>
           <ul className="space-y-1">
             {recents.map((c) => (
@@ -224,15 +224,6 @@ export default function Page() {
           </ul>
         </div>
       )}
-
-      <footer className="w-full max-w-md mt-auto pt-8 pb-4 text-center">
-        <button
-          onClick={() => router.push("/privacy")}
-          className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
-        >
-          Datenschutz
-        </button>
-      </footer>
-    </main>
+    </div>
   );
 }
