@@ -49,11 +49,19 @@ body {
 }
 
 /* The scroll container is the single <main> immediate child. Pages
- * use Tailwind's min-h-screen / h-screen for their own layout; with
- * the body now padded to the usable area, those are equivalent to
- * the area between the Dynamic Island and home indicator. */
+ * use Tailwind's min-h-screen / h-screen for their own layout; we
+ * override to 100% (i.e. body's content area, which already has the
+ * safe-area insets subtracted via padding). The !important is needed
+ * because Tailwind's .h-screen class is more specific than this
+ * element-selector chain.
+ *
+ * Without this, <main> would be 100vh (full screen including the
+ * Dynamic Island + home indicator zones) while body's content area
+ * is smaller, so bottom-positioned UI (like the chat recorder bar)
+ * gets clipped below the visible viewport. */
 body > main {
-  height: 100%;
+  height: 100% !important;
+  min-height: 100% !important;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
