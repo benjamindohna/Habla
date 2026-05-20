@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import AudioRecorder from "./AudioRecorder";
 import AIBubble from "./AIBubble";
 import UserBubble from "./UserBubble";
@@ -117,6 +117,47 @@ export default function ConversationView({
   const [topicsError, setTopicsError] = useState<string | null>(null);
   const [rerolling, setRerolling] = useState(false);
   const [pickingTopic, setPickingTopic] = useState<string | null>(null);
+
+  // Viewport-aware positioning for the picker bubble. The Thema button
+  // sits to the right of the recorder, so naïvely centering a 288px
+  // picker over it pushes the right edge off-screen on narrow phones.
+  // We measure on open, clamp the picker into the viewport with a
+  // small margin, and slide the tail so it still points at the
+  // button's center.
+  const themaButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [pickerOffset, setPickerOffset] = useState<{ left: number; tailLeftPercent: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!topicPickerOpen) {
+      setPickerOffset(null);
+      return;
+    }
+    function reposition() {
+      const btn = themaButtonRef.current;
+      if (!btn) return;
+      const PICKER_WIDTH = 288; // w-72
+      const SCREEN_PADDING = 12;
+      const rect = btn.getBoundingClientRect();
+      const buttonCenterX = rect.left + rect.width / 2;
+      const viewportWidth = window.innerWidth;
+
+      let desiredLeft = buttonCenterX - PICKER_WIDTH / 2;
+      const maxLeft = viewportWidth - PICKER_WIDTH - SCREEN_PADDING;
+      const minLeft = SCREEN_PADDING;
+      if (desiredLeft > maxLeft) desiredLeft = maxLeft;
+      if (desiredLeft < minLeft) desiredLeft = minLeft;
+
+      // The picker is positioned inside the button's `relative` wrapper,
+      // so we convert from viewport-x to button-wrapper-relative offset.
+      const leftRelativeToWrapper = desiredLeft - rect.left;
+      const tailLeftPx = buttonCenterX - desiredLeft;
+      const tailLeftPercent = Math.max(8, Math.min(92, (tailLeftPx / PICKER_WIDTH) * 100));
+      setPickerOffset({ left: leftRelativeToWrapper, tailLeftPercent });
+    }
+    reposition();
+    window.addEventListener("resize", reposition);
+    return () => window.removeEventListener("resize", reposition);
+  }, [topicPickerOpen]);
 
   // Pre-load topics as soon as we know the chat is empty — the
   // /api/topics/current endpoint is a plain DB read against the
@@ -444,6 +485,7 @@ export default function ConversationView({
             {isEmpty && (
               <div className="relative">
                 <button
+                  ref={themaButtonRef}
                   onClick={() => setTopicPickerOpen((v) => !v)}
                   disabled={pickingTopic !== null}
                   className="text-sm text-neutral-600 hover:text-neutral-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-neutral-200 hover:border-neutral-400"
@@ -454,14 +496,22 @@ export default function ConversationView({
                   </span>
                 </button>
 
-                {/* Speech-bubble picker centred over the Thema button. The
-                    tail is drawn with two stacked triangles (outer = border
-                    colour, inner = bg) so the border shows through. */}
+                {/* Speech-bubble picker. Default position centres over the
+                    Thema button; on narrow viewports the useLayoutEffect
+                    above measures the button + viewport and clamps the
+                    picker into the screen with a 12px margin, then nudges
+                    the tail (via tailLeftPercent) so it still points at the
+                    button's centre. The visibility/transition guard keeps
+                    the picker invisible during the first measurement so
+                    there's no flash of wrong position. */}
                 {topicPickerOpen && (
                   <div
-                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 z-20 w-72 rounded-xl border border-neutral-200 bg-white shadow-lg p-3"
+                    className="absolute bottom-full mb-3 z-20 w-72 rounded-xl border border-neutral-200 bg-white shadow-lg p-3"
                     role="dialog"
                     aria-label="Themen-Empfehlungen"
+                    style={pickerOffset
+                      ? { left: `${pickerOffset.left}px` }
+                      : { visibility: "hidden", left: 0 }}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-[10px] uppercase tracking-wider text-neutral-400">
@@ -507,15 +557,18 @@ export default function ConversationView({
                     )}
 
                     {/* Tail: 8px triangle, outline + inner fill so it
-                        matches the bubble's border. Centred to point at
-                        the Thema button below. */}
+                        matches the bubble's border. left% is set
+                        dynamically so the tail tracks the Thema button
+                        even when the bubble has been clamped sideways. */}
                     <span
                       aria-hidden="true"
-                      className="absolute -bottom-[7px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-neutral-200"
+                      className="absolute -bottom-[7px] -translate-x-1/2 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-neutral-200"
+                      style={{ left: `${pickerOffset?.tailLeftPercent ?? 50}%` }}
                     />
                     <span
                       aria-hidden="true"
-                      className="absolute -bottom-[6px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-white"
+                      className="absolute -bottom-[6px] -translate-x-1/2 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-l-transparent border-r-transparent border-t-white"
+                      style={{ left: `${pickerOffset?.tailLeftPercent ?? 50}%` }}
                     />
                   </div>
                 )}
