@@ -106,7 +106,7 @@ export default function FreeInputPage() {
   const isProcessing = stage.kind === "transcribing" || stage.kind === "correcting";
 
   return (
-    <div className="flex flex-col items-center px-4 py-8 min-h-full">
+    <div className="flex flex-col items-center justify-center px-4 py-8 min-h-full">
       <div className="w-full max-w-3xl">
         <h1 className="text-xl font-semibold tracking-tight text-neutral-900 mb-2 text-center">
           Frei sprechen
