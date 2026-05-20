@@ -9,8 +9,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type CorrectionStyle = "natural" | "transcript_aware";
-
 interface TargetLanguageSpec {
   language: string;
   location: string | null;
@@ -25,7 +23,6 @@ interface Me {
   level: number;
   interests: string[];
   interestsText: string;
-  correctionStyle: CorrectionStyle;
 }
 
 interface RecentConversation {
@@ -93,22 +90,6 @@ export default function ChatTabPage() {
     router.push("/login");
   }
 
-  async function handleStyleChange(style: CorrectionStyle) {
-    if (!me || me.correctionStyle === style) return;
-    const previous = me.correctionStyle;
-    setMe({ ...me, correctionStyle: style });
-    try {
-      const res = await fetch("/api/me", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ correctionStyle: style }),
-      });
-      if (!res.ok) throw new Error("update failed");
-    } catch {
-      setMe({ ...me, correctionStyle: previous });
-    }
-  }
-
   async function handleStartChat() {
     if (starting) return;
     setStarting(true);
@@ -134,35 +115,22 @@ export default function ChatTabPage() {
   return (
     <div className="flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-xl flex items-center justify-between mb-12">
-        <label className="flex items-center gap-2 text-xs text-neutral-400">
-          Correction style
-          <select
-            value={me.correctionStyle}
-            onChange={(e) => handleStyleChange(e.target.value as CorrectionStyle)}
-            className="text-xs text-neutral-600 bg-transparent border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:border-neutral-400 cursor-pointer"
-          >
-            <option value="natural">Natural</option>
-            <option value="transcript_aware">Stay close to my words</option>
-          </select>
-        </label>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-neutral-500 tabular-nums">Level {me.level}</span>
-            <button
-              onClick={() => setShowLevelInfo(true)}
-              aria-label="Wie funktioniert das Level?"
-              className="w-4 h-4 rounded-full border border-neutral-300 text-neutral-400 text-[10px] leading-none flex items-center justify-center hover:border-neutral-500 hover:text-neutral-600 transition-colors"
-            >
-              ?
-            </button>
-          </div>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-neutral-500 tabular-nums">Level {me.level}</span>
           <button
-            onClick={handleLogout}
-            className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
+            onClick={() => setShowLevelInfo(true)}
+            aria-label="Wie funktioniert das Level?"
+            className="w-4 h-4 rounded-full border border-neutral-300 text-neutral-400 text-[10px] leading-none flex items-center justify-center hover:border-neutral-500 hover:text-neutral-600 transition-colors"
           >
-            Sign out
+            ?
           </button>
         </div>
+        <button
+          onClick={handleLogout}
+          className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
+        >
+          Sign out
+        </button>
       </div>
 
       {showLevelInfo && (
@@ -176,9 +144,10 @@ export default function ChatTabPage() {
           >
             <p className="text-sm font-medium text-neutral-800">Wie funktioniert das Level?</p>
             <p className="text-sm text-neutral-600 leading-relaxed">
-              Alle 24 Stunden sieht sich ein vertraulicher Algorithmus deine letzten Chat-Aufnahmen an
-              und entscheidet, ob du Fortschritte machst oder ob dein Level lieber einen Schritt
-              heruntergesetzt werden soll.
+              Dein Level reicht von 0 bis 100. 0 bedeutet absoluter Anfänger, 100 absolutes
+              Top-Niveau. Je mehr du die Chat-Funktion nutzt, desto besser kann dein Level
+              eingeschätzt werden — es passt sich nach oben oder unten an, je nachdem wie du
+              dich entwickelst.
             </p>
             <div className="flex justify-end">
               <button

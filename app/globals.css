@@ -5,9 +5,7 @@
 /* ── iOS / Capacitor safe-area handling ──────────────────────────────
  * The WebView paints behind the Dynamic Island and the home indicator
  * (viewport-fit=cover in layout.tsx). We push content out of those
- * zones via safe-area insets, with a hardcoded fallback in case the
- * env() variables come back empty (some WebView contexts / older
- * iPhones).
+ * zones via safe-area insets.
  *
  * Structure:
  *   html  → fills the viewport, no scroll
@@ -20,10 +18,13 @@
  * 100% height — without it, body would be viewport + padding tall
  * and we'd be right back at the original overscroll problem.
  *
- * The `max(env(...), 60px)` fallback: 60px covers the Dynamic Island
- * area on modern iPhones in portrait; env() reports the real value
- * when the WebView resolves it, otherwise the 60px floor kicks in.
- * Similar reasoning for the 20px home-indicator bottom inset.
+ * Default uses raw env() values: in Safari iOS those resolve to 0 when
+ * the browser chrome already covers the system zones, so the page
+ * starts flush against the chrome (no double-padding gap). When we
+ * detect Capacitor (html.capacitor, set in layout.tsx), we layer a
+ * hard 60px / 20px floor on top — that's the case where env() may
+ * report 0 in some WebView contexts yet the WebView itself paints
+ * edge-to-edge under the Dynamic Island, so a floor is necessary.
  */
 
 html, body {
@@ -42,10 +43,15 @@ body {
   height: 100%;
   overflow: hidden;
   box-sizing: border-box;
-  padding-top: max(env(safe-area-inset-top), 60px);
-  padding-bottom: max(env(safe-area-inset-bottom), 20px);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
+}
+
+html.capacitor body {
+  padding-top: max(env(safe-area-inset-top), 60px);
+  padding-bottom: max(env(safe-area-inset-bottom), 20px);
 }
 
 /* The scroll container is the single <main> immediate child. Pages
