@@ -39,6 +39,7 @@ export default function UserBubble({
         <InterpretationLine
           interpretation={result.intended_meaning_native}
           onReCorrect={onReCorrect}
+          nativeLanguage={nativeLanguage}
           align="right"
         />
 

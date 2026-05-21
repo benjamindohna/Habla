@@ -8,6 +8,7 @@ import {
   type CorrectionStyle,
 } from "@/lib/correctionPipeline";
 import { pushRecentInput, runLevelCheckIfDue } from "@/lib/levelTracker";
+import { autoSaveUnknownVocab } from "@/lib/extractUnknownVocab";
 import type { CorrectionResult } from "@/types/correction";
 
 /**
@@ -94,6 +95,20 @@ export async function POST(req: NextRequest) {
       notes_native: interpretation.notes_native,
       pairs,
     };
+
+    // Fire-and-forget: scan this turn for vocab the learner likely
+    // doesn't know yet and queue each one through the standard save
+    // pipeline (which dedups against existing rows). Never blocks the
+    // correction response; failures stay in the server log.
+    void autoSaveUnknownVocab({
+      userId: session.userId,
+      transcript,
+      interpretation: interpretation.intended_meaning_native,
+      localVersionTarget: local_version_target,
+      nativeLanguage,
+      targetLanguage: user.targetLanguage,
+    });
+
     return NextResponse.json(result);
   } catch (err) {
     console.error("[/api/correct]", err);

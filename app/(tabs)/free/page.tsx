@@ -142,6 +142,7 @@ export default function FreeInputPage() {
             <InterpretationLine
               interpretation={stage.result.intended_meaning_native}
               onReCorrect={handleReCorrect}
+              nativeLanguage={me.nativeLanguage}
               align="left"
             />
             <CorrectionBlock
