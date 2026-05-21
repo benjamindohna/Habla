@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const t0 = Date.now();
     const verdict = await judgeVocabAnswer({
       target_word: row.targetWordOriginal,
       tested_description: row.englishDescription,
@@ -56,6 +57,8 @@ export async function POST(req: NextRequest) {
       targetLanguage: user.targetLanguage,
       native_language: user.nativeLanguage,
     });
+    const elapsed = Date.now() - t0;
+    console.log(`[judge] verdict=${verdict} elapsed=${elapsed}ms`);
     return NextResponse.json({
       result: verdict,
       english_description: row.englishDescription,
