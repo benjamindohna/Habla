@@ -110,6 +110,10 @@ interface Usage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  // xAI Grok models expose hidden reasoning tokens here even when we
+  // request a non-reasoning variant; surface them in the log so we
+  // notice if a model starts "thinking" silently.
+  completion_tokens_details?: { reasoning_tokens?: number };
 }
 
 /**
@@ -127,8 +131,10 @@ function shouldLog(): boolean {
 
 function logUsage(label: string, model: string, usage: Usage | undefined): void {
   if (!shouldLog() || !usage) return;
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens;
+  const reasoningPart = reasoning && reasoning > 0 ? ` reasoning=${reasoning}` : "";
   console.log(
-    `[llm] ${label} model=${model} prompt=${usage.prompt_tokens ?? "?"} completion=${usage.completion_tokens ?? "?"} total=${usage.total_tokens ?? "?"}`,
+    `[llm] ${label} model=${model} prompt=${usage.prompt_tokens ?? "?"} completion=${usage.completion_tokens ?? "?"}${reasoningPart} total=${usage.total_tokens ?? "?"}`,
   );
 }
 
