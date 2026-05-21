@@ -6,23 +6,16 @@
 // tap-explainable (and the follow-up Q&A bar lives inside that
 // explanation), exactly like in the chat correction flow.
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 import AudioRecorder from "@/components/AudioRecorder";
 import CorrectionBlock from "@/components/CorrectionBlock";
 import InterpretationLine from "@/components/InterpretationLine";
+import { useMe } from "@/components/MeProvider";
 import type { CorrectionResult } from "@/types/correction";
 
 type CorrectionStyle = "natural" | "transcript_aware";
 
-interface Me {
-  id: number;
-  nativeLanguage: string;
-  correctionStyle: CorrectionStyle;
-}
-
 type Stage =
-  | { kind: "loading" }
   | { kind: "ready"; result: CorrectionResult | null }
   | { kind: "transcribing" }
   | { kind: "correcting"; transcript: string }
@@ -54,30 +47,10 @@ async function correctTranscript(args: {
 }
 
 export default function FreeInputPage() {
-  const router = useRouter();
-  const [me, setMe] = useState<Me | null>(null);
-  const [stage, setStage] = useState<Stage>({ kind: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/me")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Not authenticated"))))
-      .then((data: Me) => {
-        if (!cancelled) {
-          setMe(data);
-          setStage({ kind: "ready", result: null });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) router.push("/login");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+  const me = useMe();
+  const [stage, setStage] = useState<Stage>({ kind: "ready", result: null });
 
   async function handleRecordingComplete(blob: Blob) {
-    if (!me) return;
     try {
       setStage({ kind: "transcribing" });
       const transcript = await transcribeAudio(blob, me.nativeLanguage);
@@ -97,7 +70,7 @@ export default function FreeInputPage() {
   // raw transcript already on the result so we don't need to re-record;
   // the API skips the interpret step when overrideIntendedMeaning is set.
   async function handleReCorrect(override: string) {
-    if (!me || stage.kind !== "ready" || !stage.result) return;
+    if (stage.kind !== "ready" || !stage.result) return;
     const transcript = stage.result.transcript_raw;
     setStage({ kind: "correcting", transcript });
     try {
@@ -115,14 +88,6 @@ export default function FreeInputPage() {
 
   function resetForNext() {
     setStage({ kind: "ready", result: null });
-  }
-
-  if (stage.kind === "loading" || !me) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-neutral-400">Loading…</p>
-      </div>
-    );
   }
 
   const isProcessing = stage.kind === "transcribing" || stage.kind === "correcting";

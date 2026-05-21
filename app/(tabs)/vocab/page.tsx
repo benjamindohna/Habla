@@ -1,23 +1,19 @@
+"use client";
+
 // Vocab tab — menu to pick between recognition (Übersetzen) and
-// production (Anwenden) practice modes. Server-rendered: labels for
-// "Französisch → Deutsch erkennen" / "Spanisch → ..." are filled in
-// at render time using the user's stored target + native language,
-// so the page arrives with no loading flicker.
+// production (Anwenden) practice modes. Pure client-side render now:
+// user data comes from MeProvider in the tabs layout, so switching to
+// this tab is instant (no server roundtrip for the language labels).
+// The two cards are static markup — no DB lookups, no LLM calls.
 
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
-import { getUserById } from "@/lib/users";
+import { useMe } from "@/components/MeProvider";
 import { languageLabel } from "@/lib/languageLabels";
 
-export default async function VocabMenuPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  const user = await getUserById(session.userId);
-  if (!user) redirect("/login");
-
-  const targetLabel = languageLabel(user.targetLanguage.language, user.nativeLanguage);
-  const nativeLabel = languageLabel(user.nativeLanguage, user.nativeLanguage);
+export default function VocabMenuPage() {
+  const me = useMe();
+  const targetLabel = languageLabel(me.targetLanguage.language, me.nativeLanguage);
+  const nativeLabel = languageLabel(me.nativeLanguage, me.nativeLanguage);
 
   return (
     <div className="flex flex-col items-center px-4 py-8">

@@ -8,22 +8,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-
-interface TargetLanguageSpec {
-  language: string;
-  location: string | null;
-  style: "everyday" | "street" | "office";
-}
-
-interface Me {
-  id: number;
-  email: string;
-  nativeLanguage: string;
-  targetLanguage: TargetLanguageSpec;
-  level: number;
-  interests: string[];
-  interestsText: string;
-}
+import { useMe } from "@/components/MeProvider";
 
 interface RecentConversation {
   id: number;
@@ -33,6 +18,12 @@ interface RecentConversation {
 }
 
 const RECENT_LIMIT = 5;
+
+// Module-level cache for "Letzte Chats" — survives tab unmount so a
+// return visit shows the previous list instantly while a background
+// refresh keeps it current. Stale-while-revalidate by hand because
+// we don't have SWR in the project.
+let cachedRecents: RecentConversation[] | null = null;
 
 function relativeTime(unixSeconds: number): string {
   const diff = Math.floor(Date.now() / 1000) - unixSeconds;
@@ -49,41 +40,31 @@ function relativeTime(unixSeconds: number): string {
 
 export default function ChatTabPage() {
   const router = useRouter();
-  const [me, setMe] = useState<Me | null>(null);
+  const me = useMe();
   const [starting, setStarting] = useState(false);
-  const [recents, setRecents] = useState<RecentConversation[] | null>(null);
+  const [recents, setRecents] = useState<RecentConversation[] | null>(cachedRecents);
   const [showLevelInfo, setShowLevelInfo] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    fetch("/api/me")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load profile"))))
-      .then((data: Me) => {
-        if (!cancelled) setMe(data);
-      })
-      .catch(() => {
-        if (!cancelled) router.push("/login");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
-
-  useEffect(() => {
-    if (!me) return;
+    // Stale-while-revalidate: render cachedRecents instantly (already
+    // in state via useState initialiser above), then re-fetch in the
+    // background to pick up any new conversation the user finished
+    // since the cache was filled.
     let cancelled = false;
     fetch(`/api/conversations/recent?limit=${RECENT_LIMIT}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load recent chats"))))
       .then((data: { conversations: RecentConversation[] }) => {
-        if (!cancelled) setRecents(data.conversations);
+        if (cancelled) return;
+        cachedRecents = data.conversations;
+        setRecents(data.conversations);
       })
       .catch(() => {
-        if (!cancelled) setRecents([]);
+        if (!cancelled && cachedRecents === null) setRecents([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [me]);
+  }, []);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -102,14 +83,6 @@ export default function ChatTabPage() {
       console.error("[handleStartChat]", err);
       setStarting(false);
     }
-  }
-
-  if (!me) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-neutral-400">Loading…</p>
-      </div>
-    );
   }
 
   return (

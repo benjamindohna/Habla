@@ -11,11 +11,14 @@
 // page file and no bottom nav.
 
 import BottomNav from "@/components/BottomNav";
+import { MeProvider } from "@/components/MeProvider";
 
 export default function TabsLayout({ children }: { children: React.ReactNode }) {
   return (
     <main className="h-full flex flex-col bg-neutral-50">
-      <div className="flex-1 overflow-y-auto">{children}</div>
+      <div className="flex-1 overflow-y-auto">
+        <MeProvider>{children}</MeProvider>
+      </div>
       <BottomNav />
     </main>
   );
