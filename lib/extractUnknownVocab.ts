@@ -57,7 +57,53 @@ A word/phrase is NOT unknown when:
 - It is a proper noun (names of people, brands, cities)
 - It is a number or trivial filler
 
-Prefer single words. Group into a short phrase only when the meaning depends on the unit (fixed expression like "tener ganas", "por ejemplo", compound verbs like "darse cuenta"). Always use the form as it appears in the CORRECT VERSION — that's the lemma the learner needs to learn.
+Prefer single words. Group into a short phrase only when the meaning depends on the unit (fixed expression like "tener ganas", "por ejemplo", compound verbs like "darse cuenta", contrastive conjunctions like "mientras que", verb+noun idioms like "llamar la atención"). Always use the form as it appears in the CORRECT VERSION — that's the lemma the learner needs to learn.
+
+═════ WORKED EXAMPLES (Spanish target, German native — rules apply to any language pair) ═════
+
+EXAMPLE 1 — content noun substituted with native word (extract the target noun):
+TRANSCRIPT:  "Voy al Schreibtisch para trabajar."
+INTERPRETATION: "Ich gehe zum Schreibtisch um zu arbeiten."
+CORRECT: "Voy al escritorio para trabajar."
+unknown_words: ["escritorio"]
+
+EXAMPLE 2 — phrasal trap, must save WHOLE phrase not the bare conjunction:
+TRANSCRIPT:  "Las tapas son pequeñas, mientras los antipasti son aperitivos."
+INTERPRETATION: "Tapas sind klein, wohingegen Antipasti Aperitifs sind."
+CORRECT: "Las tapas son porciones pequeñas, mientras que los antipasti son aperitivos."
+unknown_words: ["mientras que"]
+  ✗ NEVER "que" alone — "que" by itself has no contrastive sense; the
+  contrastive meaning lives in the phrase "mientras que". Saving the
+  bare conjunction would create a card whose sense the word can't
+  actually carry alone.
+
+EXAMPLE 3 — function word dropped, but still SKIP it (no card):
+TRANSCRIPT:  "Voy cine ahora."
+INTERPRETATION: "Ich gehe jetzt ins Kino."
+CORRECT: "Voy al cine ahora."
+unknown_words: []
+  The contracted article "al" was missing, but articles are function
+  words — skip even when missing. The learner doesn't need a vocab
+  card for "al"; they need exposure.
+
+EXAMPLE 4 — verb+noun idiom, save the FULL idiom unit:
+TRANSCRIPT:  "¿Hay una jugada que te haya llamado en los videos?"
+INTERPRETATION: "Gibt es eine Spielszene, die dir in den Videos aufgefallen ist?"
+CORRECT: "¿Hay alguna jugada que te haya llamado la atención en los videos?"
+unknown_words: ["llamar la atención"]
+  ✗ NEVER "te haya llamado" alone — without "la atención" the phrase
+  reverts to literal "called you". The idiomatic "catch attention"
+  sense only exists in the full unit "llamar la atención". Use the
+  infinitive form ("llamar"), not the conjugated form, because that's
+  the lemma the learner will encounter again across tenses.
+
+EXAMPLE 5 — fully correct, nothing to learn:
+TRANSCRIPT:  "Tengo mucha hambre hoy."
+INTERPRETATION: "Ich habe heute großen Hunger."
+CORRECT: "Tengo mucha hambre hoy."
+unknown_words: []
+
+═════ OUTPUT ═════
 
 Output ONLY valid JSON, no commentary:
 { "unknown_words": ["word", "another word", "fixed phrase"] }
