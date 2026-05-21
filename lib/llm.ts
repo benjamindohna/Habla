@@ -14,11 +14,14 @@ export const TASK_MODELS = {
   /** Higher-stakes structured output: segment alignment, learner-aware
    *  localisation, per-segment explanation. */
   chat_precise: "gpt-4o",
-  /** xAI Grok experiment slot — currently the vocab sentence judge.
-   *  grok-3-mini is xAI's cheap/fast tier (their analog to 4o-mini).
-   *  Switch to "grok-4-fast-non-reasoning" here if we want the newer
-   *  family; the rest of the swap stays one-line. */
-  chat_grok_fast: "grok-3-mini",
+  /** xAI Grok experiment slot — currently the vocab recognition judge.
+   *  grok-4-fast-non-reasoning is xAI's explicit no-CoT fast tier;
+   *  empirically ~0.6s end-to-end with 0 reasoning_tokens for the
+   *  judge prompt. Avoid grok-3-mini and grok-4-fast: both alias to a
+   *  reasoning model on xAI's backend, so a 1-character verdict
+   *  burns 150–270 reasoning tokens + 3s latency — terrible for a
+   *  call the user is blocking on. */
+  chat_grok_fast: "grok-4-fast-non-reasoning",
   /** Speech-to-text. */
   transcription: "gpt-4o-transcribe",
   /** Text-to-speech. */
