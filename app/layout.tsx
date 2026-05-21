@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import CapacitorBoot from "@/components/CapacitorBoot";
 
 export const metadata: Metadata = {
   title: "Habla",
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: CAPACITOR_DETECT }} />
       </head>
       <body className="min-h-screen bg-neutral-50 text-neutral-900 antialiased">
+        <CapacitorBoot />
         {children}
       </body>
     </html>

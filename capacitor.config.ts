@@ -35,6 +35,21 @@ const config: CapacitorConfig = {
     contentInset: "never",
     scrollEnabled: true,
   },
+  plugins: {
+    // Tame the iOS soft keyboard so it doesn't mutate the layout.
+    // - resize: "none" → WebView is NOT resized when the keyboard
+    //   appears, and the page does NOT auto-scroll to bring the
+    //   input above the keyboard. Keeps the safe-area padding stable,
+    //   so the Dynamic Island never gets exposed mid-typing and the
+    //   "page won't reset on blur" bug disappears.
+    // - style: "light" matches the rest of the app's chrome.
+    // Pair this with components/CapacitorBoot.tsx which additionally
+    // disables the OS-level scroll-into-view on focus at runtime.
+    Keyboard: {
+      resize: "none",
+      style: "light",
+    },
+  },
 };
 
 export default config;
