@@ -147,7 +147,10 @@ export default function VocabSentencePage() {
       };
 
       if (data.result === "1") {
-        await fetch("/api/vocab/commit", {
+        // Fire-and-forget the SRS write so the dismiss animation starts
+        // immediately — see comment in practice/page.tsx for the
+        // perceived-latency reasoning.
+        void fetch("/api/vocab/commit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rowId: currentCard.id, result: "1", mode: "sentence" }),
@@ -190,7 +193,7 @@ export default function VocabSentencePage() {
 
   async function handleNextAfterReveal() {
     if (!currentCard) return;
-    await fetch("/api/vocab/commit", {
+    void fetch("/api/vocab/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rowId: currentCard.id, result: "0", mode: "sentence" }),

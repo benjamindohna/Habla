@@ -145,7 +145,12 @@ export default function VocabPracticePage() {
       const data = (await res.json()) as { result: "1" | "X" | "0"; english_description: string };
 
       if (data.result === "1") {
-        await fetch("/api/vocab/commit", {
+        // Fire-and-forget the SRS write so the card dismiss animation
+        // starts instantly. The commit only mutates DB-side state the
+        // user doesn't read back; if it fails the card just reappears
+        // on the next session, no UI lie. This was a ~200-500ms
+        // perceived-latency win on mobile.
+        void fetch("/api/vocab/commit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rowId: currentCard.id, result: "1", mode: "recognition" }),
@@ -189,7 +194,7 @@ export default function VocabPracticePage() {
 
   async function handleNextAfterReveal() {
     if (!currentCard) return;
-    await fetch("/api/vocab/commit", {
+    void fetch("/api/vocab/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rowId: currentCard.id, result: "0", mode: "recognition" }),
