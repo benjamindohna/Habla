@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
     .select({
       id: userVocab.id,
       targetWordOriginal: userVocab.targetWordOriginal,
+      englishDescription: userVocab.englishDescription,
       contextSentence: userVocab.contextSentence,
       nativeTranslation: userVocab.nativeTranslation,
       nativeHint: userVocab.nativeHint,
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
   try {
     const result = await generateExplanation({
       target_word: row.targetWordOriginal,
+      english_description: row.englishDescription,
       context_sentence: row.contextSentence ?? "",
       targetLanguage: user.targetLanguage,
       native_language: user.nativeLanguage,

@@ -93,7 +93,7 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
       .returning({ id: userVocab.id });
     const rowId = inserted.id;
     await rerankAfterInsert(args.userId, rowId);
-    generateAssetsAsync(rowId, args.userId, original, args.context_sentence, args.native_language, args.targetLanguage);
+    generateAssetsAsync(rowId, args.userId, original, description, args.context_sentence, args.native_language, args.targetLanguage);
     return { action: "inserted", rowId, description };
   }
 
@@ -129,7 +129,7 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
     .returning({ id: userVocab.id });
   const rowId = inserted.id;
   await rerankAfterInsert(args.userId, rowId);
-  generateAssetsAsync(rowId, args.userId, original, args.context_sentence, args.native_language, args.targetLanguage);
+  generateAssetsAsync(rowId, args.userId, original, description, args.context_sentence, args.native_language, args.targetLanguage);
   return {
     action: "polysemy_inserted",
     rowId,
@@ -152,6 +152,7 @@ function generateAssetsAsync(
   rowId: number,
   userId: number,
   targetWord: string,
+  englishDescription: string,
   contextSentence: string,
   nativeLanguage: string,
   targetLanguage: TargetLanguageSpec,
@@ -159,6 +160,7 @@ function generateAssetsAsync(
   void Promise.allSettled([
     generateExplanation({
       target_word: targetWord,
+      english_description: englishDescription,
       context_sentence: contextSentence,
       targetLanguage,
       native_language: nativeLanguage,

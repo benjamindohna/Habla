@@ -10,13 +10,18 @@ import type { TargetLanguageSpec } from "./targetLanguage";
 export interface ExplainArgs {
   /** Target word as shown on the card (preserves casing / form). */
   target_word: string;
-  /** The sentence the word was tapped in. Used ONLY for sense
-   *  disambiguation when the word is polysemous — never to colour the
-   *  translation with topical context. Translation is decoupled from
-   *  english_description so a mis-aimed description can't cascade into
-   *  the translation; both fields are grown independently from
-   *  word + context. */
+  /** The sentence the word was tapped in. Sense-disambiguates polysemous
+   *  words and provides a writing example for the hint. */
   context_sentence: string;
+  /** English sense-key the row was saved under (e.g. "contrastive
+   *  conjunction" for "que" in "mientras que"). The judge uses this as
+   *  its ground truth, so the explanation has to translate THIS sense
+   *  to stay consistent — otherwise the reveal panel shows an answer
+   *  the judge would reject. Earlier versions deliberately decoupled
+   *  this; that bought hedge-bet correctness against mis-aimed
+   *  descriptions but at the cost of judge/explain divergence, which
+   *  is more confusing for the learner than a consistently wrong row. */
+  english_description: string;
   /** The learner's target-language spec — threaded from the session user. */
   targetLanguage: TargetLanguageSpec;
   /** e.g. "German". */
@@ -42,6 +47,8 @@ export async function generateExplanation(args: ExplainArgs): Promise<Explanatio
 
 The learner couldn't recall this word. Give a clear, structurally-faithful answer plus a short memory aid.
 
+CRITICAL — anchor on the TESTED SENSE. Below you will receive an English sense-key. Your translation must render THAT specific sense in ${args.native_language}, even when the word has other common meanings the learner might expect. Example: if the word is "que" and the tested sense is "contrastive conjunction (whereas / while)", translate as "wohingegen / während" — never "was / dass". The judge that evaluates the learner uses this same sense-key as ground truth, so a translation that drifts to a different sense will tell the learner an answer the judge will reject.
+
 The TRANSLATION must be the natural ${args.native_language} equivalent that mirrors the STRUCTURE of the target word — preserve every semantic component the target carries:
 - Single noun → article (with correct gender) + noun.
 - Single conjugated verb → infinitive form, OR include the subject pronoun if the conjugation is distinctive (1st/2nd person).
@@ -49,7 +56,7 @@ The TRANSLATION must be the natural ${args.native_language} equivalent that mirr
 - Idiom / fixed expression → idiomatic ${args.native_language} equivalent (or close paraphrase if no exact idiom exists).
 - Adjective / adverb / function word → plain natural form.
 
-CRITICAL — translate the WORD'S CORE MEANING, not the context's flavour. The sentence is given ONLY for sense disambiguation when the word is polysemous (e.g. "banco" can be financial or bench — the context picks one). For monosemic words, IGNORE the context entirely; do not let topical nouns from the sentence ("birds", "ocean", "game", "teammates") leak into your translation or hint. Litmus test: imagine the same word used in a different context tomorrow — would your translation still apply? If no, you've over-specified.
+CONTEXT-LEAK GUARD — translate the WORD'S CORE MEANING, not the context's flavour. The sentence is given for sense disambiguation and for the hint's example, never to colour the translation with topical context. Do not let topical nouns from the sentence ("birds", "ocean", "game", "teammates") leak into your translation. Litmus test: imagine the same word used in a different context tomorrow — would your translation still apply? If no, you've over-specified.
 
 Worked examples (target Spanish, native German — illustrative, the same logic applies to any pair):
 - "casa"                → translation: "das Haus", hint: "Ein Gebäude, in dem man wohnt."
@@ -71,7 +78,8 @@ Anti-examples — these are CONTEXT-LEAK failures. The bad version pulls vocabul
 - "toque" in "un toque sutil del defensa" → ❌ "geschickter Spielzug" ✅ "die Berührung"
 
 Word: "${args.target_word}"
-Context where the word appears: "${args.context_sentence}"
+Tested sense (English sense-key — your translation must render THIS sense): "${args.english_description}"
+Context where the word appears (use for the hint example; for sense, prefer the sense-key above): "${args.context_sentence}"
 
 Return ONLY valid JSON:
 {

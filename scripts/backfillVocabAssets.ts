@@ -15,6 +15,7 @@ interface Row {
   id: number;
   user_id: number;
   target_word_original: string;
+  english_description: string;
   context_sentence: string | null;
   native_translation: string | null;
   native_hint: string | null;
@@ -41,6 +42,7 @@ async function backfillRow(row: Row): Promise<{ id: number; explainOk: boolean; 
         try {
           const res = await generateExplanation({
             target_word: row.target_word_original,
+            english_description: row.english_description,
             context_sentence: row.context_sentence ?? "",
             targetLanguage: user.targetLanguage,
             native_language: user.nativeLanguage,
@@ -81,6 +83,7 @@ async function main() {
       id: userVocab.id,
       user_id: userVocab.userId,
       target_word_original: userVocab.targetWordOriginal,
+      english_description: userVocab.englishDescription,
       context_sentence: userVocab.contextSentence,
       native_translation: userVocab.nativeTranslation,
       native_hint: userVocab.nativeHint,
