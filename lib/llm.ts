@@ -14,20 +14,62 @@ export const TASK_MODELS = {
   /** Higher-stakes structured output: segment alignment, learner-aware
    *  localisation, per-segment explanation. */
   chat_precise: "gpt-4o",
+  /** xAI Grok experiment slot — currently the vocab sentence judge.
+   *  grok-3-mini is xAI's cheap/fast tier (their analog to 4o-mini).
+   *  Switch to "grok-4-fast-non-reasoning" here if we want the newer
+   *  family; the rest of the swap stays one-line. */
+  chat_grok_fast: "grok-3-mini",
   /** Speech-to-text. */
   transcription: "gpt-4o-transcribe",
   /** Text-to-speech. */
   tts: "gpt-4o-mini-tts",
 } as const;
 
-export type ChatTask = "chat_light" | "chat_precise";
+export type ChatTask = "chat_light" | "chat_precise" | "chat_grok_fast";
 
-let _client: OpenAI | null = null;
+const GROK_TASKS = new Set<ChatTask>(["chat_grok_fast"]);
+
+let _openaiClient: OpenAI | null = null;
+let _grokClient: OpenAI | null = null;
+
 export function getOpenAI(): OpenAI {
-  if (!_client) {
-    _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  if (!_openaiClient) {
+    _openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
-  return _client;
+  return _openaiClient;
+}
+
+function getGrok(): OpenAI {
+  if (!_grokClient) {
+    const key = process.env.XAI_API_KEY;
+    if (!key) throw new Error("XAI_API_KEY is not set");
+    // xAI exposes an OpenAI-compatible REST surface — same SDK, just a
+    // different baseURL. Models from TASK_MODELS that live under
+    // chat_grok_fast (or any future grok-tagged slot) go through this
+    // client; everything else stays on OpenAI.
+    _grokClient = new OpenAI({ apiKey: key, baseURL: "https://api.x.ai/v1" });
+  }
+  return _grokClient;
+}
+
+/**
+ * Picks the right SDK client + model for a task. If a grok task is
+ * requested but XAI_API_KEY isn't set yet, falls back to chat_light
+ * (gpt-4o-mini) with a loud warning so the app keeps working until
+ * the key is provisioned in env. Once XAI_API_KEY is present, the
+ * call lands on Grok without further changes.
+ */
+function resolveClientAndModel(task: ChatTask): { client: OpenAI; model: string } {
+  if (GROK_TASKS.has(task)) {
+    if (!process.env.XAI_API_KEY) {
+      console.warn(
+        `[llm] ${task} requested but XAI_API_KEY missing — falling back to ${TASK_MODELS.chat_light}`,
+      );
+      return { client: getOpenAI(), model: TASK_MODELS.chat_light };
+    }
+    return { client: getGrok(), model: TASK_MODELS[task] };
+  }
+  return { client: getOpenAI(), model: TASK_MODELS[task] };
 }
 
 export type ChatMessage = {
@@ -117,8 +159,8 @@ export function logAudioUsage(
  * reply. Throws if the reply is empty or not valid JSON.
  */
 export async function chatJSON<T = unknown>(opts: ChatJSONOpts): Promise<T> {
-  const model = TASK_MODELS[opts.task];
-  const completion = await getOpenAI().chat.completions.create({
+  const { client, model } = resolveClientAndModel(opts.task);
+  const completion = await client.chat.completions.create({
     model,
     response_format: { type: "json_object" },
     messages: buildMessages(opts),
@@ -134,8 +176,8 @@ export async function chatJSON<T = unknown>(opts: ChatJSONOpts): Promise<T> {
  * the trimmed message content.
  */
 export async function chatText(opts: ChatTextOpts): Promise<string> {
-  const model = TASK_MODELS[opts.task];
-  const completion = await getOpenAI().chat.completions.create({
+  const { client, model } = resolveClientAndModel(opts.task);
+  const completion = await client.chat.completions.create({
     model,
     messages: buildMessages(opts),
     temperature: opts.temperature ?? 0.2,

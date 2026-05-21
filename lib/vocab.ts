@@ -308,7 +308,12 @@ Learner's answer: "${args.user_answer}"
 Reply with exactly one character: 1, X, or 0. No explanation, no punctuation, no quotes.`;
 
   const raw = await chatText({
-    task: "chat_light",
+    // Grok experiment: judging a single-word recognition answer is a
+    // latency-critical call (user is staring at the card). xAI's
+    // grok-3-mini is comparable to gpt-4o-mini on quality and faster,
+    // so we route this one slot through it. Falls back to 4o-mini
+    // automatically while XAI_API_KEY is unset — see resolveClient.
+    task: "chat_grok_fast",
     label: "vocab/judge",
     systemPrompt: prompt,
     temperature: 0,
