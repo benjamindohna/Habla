@@ -25,6 +25,14 @@ export interface DueVocabRow {
   /** Stage for the queried MODE (aliased from stage / stage_sentence). */
   stage: number;
   last_seen: number;
+  /** Cached native-language translation + hint, populated by
+   *  generateAssetsAsync at save time or by the explain endpoint on
+   *  first reveal. Sent down with the queue so flipping a card no
+   *  longer requires a second roundtrip — the client uses these
+   *  directly and only falls back to /api/vocab/explain when both
+   *  are null (e.g. brand-new card before the async job lands). */
+  native_translation: string | null;
+  native_hint: string | null;
 }
 
 function stageColumnExpr(mode: VocabMode) {
@@ -63,6 +71,8 @@ export async function getDueVocabQueue(
       english_description: userVocab.englishDescription,
       stage: stageCol,
       last_seen: userVocab.lastSeen,
+      native_translation: userVocab.nativeTranslation,
+      native_hint: userVocab.nativeHint,
     })
     .from(userVocab)
     .where(

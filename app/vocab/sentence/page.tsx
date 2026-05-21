@@ -22,11 +22,15 @@ interface QueueResponse {
     english_description: string;
     stage: number;
     last_seen: number;
+    native_translation: string | null;
+    native_hint: string | null;
   }>;
 }
 
 interface ServerCard extends VocabCardData {
   english_description: string;
+  native_translation: string | null;
+  native_hint: string | null;
 }
 
 interface Explanation {
@@ -68,6 +72,8 @@ export default function VocabSentencePage() {
           target_word_original: c.target_word_original,
           english_description: c.english_description,
           stage: c.stage,
+          native_translation: c.native_translation,
+          native_hint: c.native_hint,
         }));
         setCards(next);
         setStage(next.length > 0 ? "ready" : "empty");
@@ -107,6 +113,17 @@ export default function VocabSentencePage() {
   }
 
   async function fetchExplanation(rowId: number) {
+    // Fast path: use the translation + hint we already pulled down in
+    // the queue payload. Only fall back to the explain endpoint when
+    // both are null (very recently saved card, async job pending).
+    const card = cards.find((c) => c.id === rowId);
+    if (card && card.native_translation) {
+      setExplanation({
+        translation: card.native_translation,
+        hint: card.native_hint ?? "",
+      });
+      return;
+    }
     setExplanation(null);
     try {
       const res = await fetch("/api/vocab/explain", {

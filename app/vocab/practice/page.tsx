@@ -15,11 +15,15 @@ interface QueueResponse {
     english_description: string;
     stage: number;
     last_seen: number;
+    native_translation: string | null;
+    native_hint: string | null;
   }>;
 }
 
 interface ServerCard extends VocabCardData {
   english_description: string;
+  native_translation: string | null;
+  native_hint: string | null;
 }
 
 interface Explanation {
@@ -67,6 +71,8 @@ export default function VocabPracticePage() {
           target_word_original: c.target_word_original,
           english_description: c.english_description,
           stage: c.stage,
+          native_translation: c.native_translation,
+          native_hint: c.native_hint,
         }));
         setCards(next);
         setStage(next.length > 0 ? "ready" : "empty");
@@ -105,10 +111,20 @@ export default function VocabPracticePage() {
     }, EXIT_DURATION_MS);
   }
 
-  /** Fetch the native-language translation + hint for the given card.
-   *  Sets explanation to a fallback string on failure so the Weiter
-   *  button is not blocked. */
+  /** Fast path: translation + hint already came down with the queue
+   *  payload, so on flip we use what we have instantly — no network
+   *  roundtrip. Only when the row was saved so recently that the
+   *  background explain job hasn't landed yet do we fall back to
+   *  /api/vocab/explain (which then generates + caches). */
   async function fetchExplanation(rowId: number) {
+    const card = cards.find((c) => c.id === rowId);
+    if (card && card.native_translation) {
+      setExplanation({
+        translation: card.native_translation,
+        hint: card.native_hint ?? "",
+      });
+      return;
+    }
     setExplanation(null);
     try {
       const res = await fetch("/api/vocab/explain", {
