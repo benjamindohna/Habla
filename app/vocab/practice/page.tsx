@@ -309,77 +309,31 @@ export default function VocabPracticePage() {
                 onTapFront={
                   stage === "ready" || stage === "feedback-x" ? handleDontKnow : undefined
                 }
+                revealed={stage === "revealed"}
+                back={
+                  <CardBack
+                    revealReason={revealReason}
+                    revealHeading={revealHeading()}
+                    explanation={explanation}
+                  />
+                }
               />
 
-              {/* Reveal panel — wrong / three-x / gave-up. Shows the
-                  LLM-generated translation + hint. */}
+              {/* Full-width Weiter button, visible only after the flip. */}
               {stage === "revealed" && (
-                <div
-                  className={`rounded-2xl border p-4 ${
+                <button
+                  onClick={handleNextAfterReveal}
+                  disabled={explanation === null}
+                  className={`w-full px-4 py-3 rounded-2xl text-white text-base font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     revealReason === "three-x"
-                      ? "border-amber-200 bg-amber-50"
+                      ? "bg-amber-900 hover:bg-amber-800"
                       : revealReason === "gave-up"
-                      ? "border-neutral-200 bg-white"
-                      : "border-rose-200 bg-rose-50"
+                      ? "bg-neutral-800 hover:bg-neutral-700"
+                      : "bg-rose-900 hover:bg-rose-800"
                   }`}
                 >
-                  <p
-                    className={`text-xs uppercase tracking-wider ${
-                      revealReason === "three-x"
-                        ? "text-amber-700"
-                        : revealReason === "gave-up"
-                        ? "text-neutral-500"
-                        : "text-rose-700"
-                    }`}
-                  >
-                    {revealHeading()}
-                  </p>
-
-                  {explanation === null ? (
-                    <p className="mt-2 text-sm italic text-neutral-400">Antwort wird geladen…</p>
-                  ) : (
-                    <>
-                      <p
-                        className={`mt-2 text-xl font-medium ${
-                          revealReason === "three-x"
-                            ? "text-amber-900"
-                            : revealReason === "gave-up"
-                            ? "text-neutral-900"
-                            : "text-rose-900"
-                        }`}
-                      >
-                        {explanation.translation}
-                      </p>
-                      {explanation.hint && (
-                        <p
-                          className={`mt-0.5 text-sm ${
-                            revealReason === "three-x"
-                              ? "text-amber-800"
-                              : revealReason === "gave-up"
-                              ? "text-neutral-600"
-                              : "text-rose-800"
-                          }`}
-                        >
-                          {explanation.hint}
-                        </p>
-                      )}
-                    </>
-                  )}
-
-                  <button
-                    onClick={handleNextAfterReveal}
-                    disabled={explanation === null}
-                    className={`mt-5 px-4 py-1.5 rounded-lg text-white text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                      revealReason === "three-x"
-                        ? "bg-amber-900 hover:bg-amber-800"
-                        : revealReason === "gave-up"
-                        ? "bg-neutral-800 hover:bg-neutral-700"
-                        : "bg-rose-900 hover:bg-rose-800"
-                    }`}
-                  >
-                    Weiter →
-                  </button>
-                </div>
+                  Weiter →
+                </button>
               )}
 
               {/* Input + Antworten + don't-know. */}
@@ -429,5 +383,63 @@ export default function VocabPracticePage() {
           )}
       </div>
     </main>
+  );
+}
+
+// The back face of the flipped card. Same content the old reveal panel
+// rendered — heading + translation + hint — but laid out to fill the
+// card's bounding box and tinted by revealReason so the colour cue
+// (wrong = rose, three-x = amber, gave-up = neutral) survives the flip.
+interface CardBackProps {
+  revealReason: RevealReason | null;
+  revealHeading: string;
+  explanation: Explanation | null;
+}
+
+function CardBack({ revealReason, revealHeading, explanation }: CardBackProps) {
+  const bgClass =
+    revealReason === "three-x"
+      ? "bg-amber-50 border-amber-200"
+      : revealReason === "gave-up"
+      ? "bg-white border-neutral-200"
+      : "bg-rose-50 border-rose-200";
+
+  const headingClass =
+    revealReason === "three-x"
+      ? "text-amber-700"
+      : revealReason === "gave-up"
+      ? "text-neutral-500"
+      : "text-rose-700";
+
+  const translationClass =
+    revealReason === "three-x"
+      ? "text-amber-900"
+      : revealReason === "gave-up"
+      ? "text-neutral-900"
+      : "text-rose-900";
+
+  const hintClass =
+    revealReason === "three-x"
+      ? "text-amber-800"
+      : revealReason === "gave-up"
+      ? "text-neutral-600"
+      : "text-rose-800";
+
+  return (
+    <div className={`w-full h-full rounded-2xl border shadow-sm flex flex-col items-center justify-center text-center px-6 py-8 ${bgClass}`}>
+      <p className={`text-xs uppercase tracking-wider ${headingClass}`}>{revealHeading}</p>
+      {explanation === null ? (
+        <p className="mt-3 text-sm italic text-neutral-400">Antwort wird geladen…</p>
+      ) : (
+        <>
+          <p className={`mt-3 text-2xl font-medium ${translationClass}`}>
+            {explanation.translation}
+          </p>
+          {explanation.hint && (
+            <p className={`mt-2 text-sm ${hintClass}`}>{explanation.hint}</p>
+          )}
+        </>
+      )}
+    </div>
   );
 }

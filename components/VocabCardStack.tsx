@@ -57,14 +57,29 @@ interface Props {
    *  page place the answer input / feedback inside the same visual
    *  container without VocabCardStack knowing about that flow. */
   frontOverlay?: React.ReactNode;
-  /** Optional handler invoked when the user taps the front card itself
-   *  (specifically the word). Used by the practice page as a "flip /
-   *  reveal answer" shortcut so the user doesn't have to reach for the
-   *  X button. No-op when omitted. */
+  /** Optional handler invoked when the user taps the front card itself.
+   *  The ENTIRE front face is the tap target; the TTS button stops
+   *  propagation so it stays usable. Practice page wires this to "Ich
+   *  weiß es nicht" so the user can reveal by tapping the card. */
   onTapFront?: () => void;
+  /** When true the front card flips on its Y axis to show `back` instead
+   *  of the target word. Practice page sets this when stage='revealed'.
+   *  Animation is a 600ms 3D rotation; backface-visibility hides the
+   *  inside of each face during the rotation. */
+  revealed?: boolean;
+  /** Content for the back face. Rendered behind the front face and only
+   *  visible after the flip. Card stack only flips the topmost card. */
+  back?: React.ReactNode;
 }
 
-export default function VocabCardStack({ cards, exitingId, frontOverlay, onTapFront }: Props) {
+export default function VocabCardStack({
+  cards,
+  exitingId,
+  frontOverlay,
+  onTapFront,
+  revealed = false,
+  back,
+}: Props) {
   const isExiting = exitingId !== null;
   const visible = cards.slice(0, VISIBLE_LAYERS + (isExiting ? 1 : 0));
 
@@ -146,7 +161,10 @@ export default function VocabCardStack({ cards, exitingId, frontOverlay, onTapFr
   }
 
   return (
-    <div className="relative w-full max-w-md mx-auto h-72">
+    // perspective on the outer container makes the inner rotateY look
+    // like a real 3D flip instead of a flat horizontal squash. Value
+    // tuned so the card front feels close to the eye but not fish-eyed.
+    <div className="relative w-full max-w-md mx-auto h-72" style={{ perspective: 1400 }}>
       {visible.map((card, i) => {
         const isExitingThis = card.id === exitingId;
         // While exiting, cards behind the dismissing one move forward by
@@ -161,53 +179,96 @@ export default function VocabCardStack({ cards, exitingId, frontOverlay, onTapFr
         const opacity = isExitingThis ? 0 : LAYER_OPACITY[layer] ?? 0;
         const zIndex = isExitingThis ? VISIBLE_LAYERS + 1 : VISIBLE_LAYERS - layer;
 
+        // The front card uses an inner rotating shell with two
+        // back-face-hidden sides; non-front cards skip all that and
+        // render flat. Avoids paying the 3D layer cost for the silhouettes.
+        const innerRotate = isFront && revealed ? "rotateY(180deg)" : "rotateY(0deg)";
+
         return (
           <div
             key={card.id}
-            className={`absolute inset-0 rounded-2xl border shadow-sm transition-all duration-[400ms] ease-out flex items-center justify-center ${
-              LAYER_BG[layer] ?? LAYER_BG[VISIBLE_LAYERS - 1]
-            } ${LAYER_BORDER[layer] ?? LAYER_BORDER[VISIBLE_LAYERS - 1]}`}
+            className="absolute inset-0 transition-all duration-[400ms] ease-out"
             style={{ transform, opacity, zIndex }}
             aria-hidden={!isFront}
           >
             {isFront ? (
-              <>
-                {/* TTS button — top-right of the front card. */}
-                <button
-                  onClick={handleSpeak}
-                  disabled={ttsLoading}
-                  aria-label={ttsPlaying ? "Stop" : "Wort vorlesen"}
-                  title={ttsPlaying ? "Stop" : "Wort vorlesen"}
-                  className="absolute top-3.5 right-3.5 p-1.5 rounded-lg text-neutral-300 hover:text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              // Inner flip shell — preserve-3d lets the children sit at
+              // different rotateY values. transition on transform alone
+              // (not transform-all) so the parent's translateY stack
+              // animation doesn't get smeared by the flip's easing.
+              <div
+                className="relative w-full h-full"
+                style={{
+                  transformStyle: "preserve-3d",
+                  transform: innerRotate,
+                  transition: "transform 600ms cubic-bezier(0.4, 0, 0.2, 1)",
+                }}
+              >
+                {/* Front face */}
+                <div
+                  className={`absolute inset-0 rounded-2xl border shadow-sm flex items-center justify-center ${LAYER_BG[0]} ${LAYER_BORDER[0]}`}
+                  style={{
+                    backfaceVisibility: "hidden",
+                    WebkitBackfaceVisibility: "hidden",
+                  }}
+                  onClick={!revealed && onTapFront ? onTapFront : undefined}
+                  role={!revealed && onTapFront ? "button" : undefined}
+                  tabIndex={!revealed && onTapFront ? 0 : undefined}
                 >
-                  {ttsLoading ? <TtsSpinner /> : ttsPlaying ? <StopIcon /> : <SpeakerIcon />}
-                </button>
+                  {/* TTS button. stopPropagation so tapping it doesn't
+                      also fire onTapFront → no accidental reveal. */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSpeak();
+                    }}
+                    disabled={ttsLoading}
+                    aria-label={ttsPlaying ? "Stop" : "Wort vorlesen"}
+                    title={ttsPlaying ? "Stop" : "Wort vorlesen"}
+                    className="absolute top-3.5 right-3.5 p-1.5 rounded-lg text-neutral-300 hover:text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {ttsLoading ? <TtsSpinner /> : ttsPlaying ? <StopIcon /> : <SpeakerIcon />}
+                  </button>
 
-                <div className="flex flex-col items-center gap-3 px-6 py-8 w-full">
-                  <p className="text-xs uppercase tracking-wider text-neutral-400">
-                    Stage {card.stage}
-                  </p>
-                  {onTapFront ? (
-                    <button
-                      type="button"
-                      onClick={onTapFront}
-                      title="Antippen für die Lösung"
-                      className="text-3xl font-medium text-neutral-900 text-center break-words cursor-pointer hover:text-neutral-600 transition-colors focus:outline-none focus-visible:underline"
-                    >
-                      {card.target_word_original}
-                    </button>
-                  ) : (
+                  <div className="flex flex-col items-center gap-3 px-6 py-8 w-full pointer-events-none">
+                    <p className="text-xs uppercase tracking-wider text-neutral-400">
+                      Stage {card.stage}
+                    </p>
                     <p className="text-3xl font-medium text-neutral-900 text-center break-words">
                       {card.target_word_original}
                     </p>
-                  )}
-                  {frontOverlay ? <div className="w-full mt-2">{frontOverlay}</div> : null}
+                    {frontOverlay ? (
+                      // re-enable pointer events for the overlay (input
+                      // would be unusable inside a pointer-events-none
+                      // wrapper).
+                      <div className="w-full mt-2 pointer-events-auto">{frontOverlay}</div>
+                    ) : null}
+                  </div>
                 </div>
-              </>
+
+                {/* Back face — same rectangle, pre-rotated 180deg so it
+                    faces forward when the shell finishes rotating. */}
+                <div
+                  className="absolute inset-0 rounded-2xl"
+                  style={{
+                    transform: "rotateY(180deg)",
+                    backfaceVisibility: "hidden",
+                    WebkitBackfaceVisibility: "hidden",
+                  }}
+                >
+                  {back}
+                </div>
+              </div>
             ) : (
-              <span className="text-2xl text-neutral-400 select-none">
-                {card.target_word_original}
-              </span>
+              <div
+                className={`w-full h-full rounded-2xl border shadow-sm flex items-center justify-center ${
+                  LAYER_BG[layer] ?? LAYER_BG[VISIBLE_LAYERS - 1]
+                } ${LAYER_BORDER[layer] ?? LAYER_BORDER[VISIBLE_LAYERS - 1]}`}
+              >
+                <span className="text-2xl text-neutral-400 select-none">
+                  {card.target_word_original}
+                </span>
+              </div>
             )}
           </div>
         );
