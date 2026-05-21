@@ -15,6 +15,13 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  // resizes-content: when the soft keyboard opens, shrink the layout
+  // viewport itself instead of scrolling the existing layout up. This
+  // is the modern fix for the iOS pain where the page would shift up
+  // on focus (pushing content behind the Dynamic Island) and never
+  // reset on blur. With this set, the page stays anchored and only
+  // the visible area shrinks while the keyboard is up.
+  interactiveWidget: "resizes-content",
 };
 
 // Inline detection: are we running inside the Capacitor WebView (native

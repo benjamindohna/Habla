@@ -54,6 +54,24 @@ html.capacitor body {
   padding-bottom: max(env(safe-area-inset-bottom), 20px);
 }
 
+/* ── iOS focus-zoom prevention ────────────────────────────────────────
+ * iOS Safari and the Capacitor WebView auto-zoom into any input whose
+ * computed font-size is < 16px. Tailwind's text-sm (14px) and text-xs
+ * (12px) classes therefore trigger the zoom on every focus, which then
+ * shifts the layout up — and after blur the page often stays parked at
+ * the shifted position because iOS doesn't reset the layout-viewport
+ * translation reliably.
+ *
+ * max(16px, 1em) forces every form control to at least 16px while
+ * leaving deliberately-larger inputs alone. Visual side effect: small
+ * Tailwind input styles render at 16px instead of their nominal size
+ * — acceptable trade for zero-zoom stability. */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
 /* The scroll container is the single <main> immediate child. Pages
  * use Tailwind's min-h-screen / h-screen for their own layout; we
  * override to 100% (i.e. body's content area, which already has the
