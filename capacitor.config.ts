@@ -13,6 +13,7 @@
 // That's a much bigger change; leave it for later.
 
 import type { CapacitorConfig } from "@capacitor/cli";
+import { KeyboardResize, KeyboardStyle } from "@capacitor/keyboard";
 
 const config: CapacitorConfig = {
   appId: "app.habla.ios",
@@ -46,8 +47,8 @@ const config: CapacitorConfig = {
     // Pair this with components/CapacitorBoot.tsx which additionally
     // disables the OS-level scroll-into-view on focus at runtime.
     Keyboard: {
-      resize: "none",
-      style: "light",
+      resize: KeyboardResize.None,
+      style: KeyboardStyle.Light,
     },
   },
 };
