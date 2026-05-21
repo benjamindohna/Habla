@@ -308,12 +308,16 @@ Learner's answer: "${args.user_answer}"
 Reply with exactly one character: 1, X, or 0. No explanation, no punctuation, no quotes.`;
 
   const raw = await chatText({
-    // Grok experiment: judging a single-word recognition answer is a
-    // latency-critical call (user is staring at the card). xAI's
-    // grok-3-mini is comparable to gpt-4o-mini on quality and faster,
-    // so we route this one slot through it. Falls back to 4o-mini
-    // automatically while XAI_API_KEY is unset — see resolveClient.
-    task: "chat_grok_fast",
+    // Tested Grok (grok-4-fast-non-reasoning) for this slot in May 2026
+    // — about 2× faster than 4o-mini on the prompt, but bad fit:
+    //   - smaller siblings (grok-3-mini, grok-4-fast) silently alias to
+    //     reasoning models, burning 150-270 hidden tokens per call
+    //   - occasional hanging requests on prod
+    //   - quality regressions on basic verdicts (e.g. flagged "ich
+    //     trainiere" as wrong while its own reasoning said it was right)
+    // Rolled back here; the chat_grok_fast slot stays in lib/llm.ts for
+    // future experiments elsewhere.
+    task: "chat_light",
     label: "vocab/judge",
     systemPrompt: prompt,
     temperature: 0,
