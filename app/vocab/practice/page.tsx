@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import VocabCardStack, { type VocabCardData } from "@/components/VocabCardStack";
 
-type Stage = "loading" | "ready" | "judging" | "feedback-x" | "revealed" | "exiting" | "empty" | "error";
-
-type RevealReason = "wrong" | "three-x" | "gave-up";
+type Stage = "loading" | "ready" | "revealed" | "exiting" | "empty" | "error";
 
 interface QueueResponse {
   cards: Array<{
@@ -33,26 +31,14 @@ interface Explanation {
 
 const EXIT_DURATION_MS = 400;
 
-// 0 verdicts are immediate fails — no retry. X verdicts (sister-meaning
-// matches) get up to 3 attempts; the third X is treated as a failure
-// because the learner has demonstrated they don't know the tested sense.
-const MAX_X_ATTEMPTS = 3;
-
 export default function VocabPracticePage() {
   const router = useRouter();
   const [stage, setStage] = useState<Stage>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [cards, setCards] = useState<ServerCard[]>([]);
   const [exitingId, setExitingId] = useState<number | null>(null);
-  const [answer, setAnswer] = useState("");
-  const [xAttempts, setXAttempts] = useState(0);
-  // Native-language explanation fetched on entering revealed state.
-  // null while in flight, populated when /api/vocab/explain returns.
   const [explanation, setExplanation] = useState<Explanation | null>(null);
-  const [revealReason, setRevealReason] = useState<RevealReason | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Initial queue fetch.
   useEffect(() => {
     let cancelled = false;
     fetch("/api/vocab/queue?mode=recognition")
@@ -87,26 +73,16 @@ export default function VocabPracticePage() {
     };
   }, [router]);
 
-  // Auto-focus the input whenever a fresh card becomes interactive.
-  useEffect(() => {
-    if (stage === "ready" || stage === "feedback-x") {
-      inputRef.current?.focus();
-    }
-  }, [stage, cards.length]);
-
   const currentCard = cards[0];
 
-  function dismissCurrentAfterCommit() {
+  function dismissCurrent() {
     if (!currentCard) return;
     setExitingId(currentCard.id);
     setStage("exiting");
     setTimeout(() => {
       setCards((cs) => cs.slice(1));
       setExitingId(null);
-      setAnswer("");
-      setXAttempts(0);
       setExplanation(null);
-      setRevealReason(null);
       setStage((prev) => (prev === "exiting" ? "ready" : prev));
     }, EXIT_DURATION_MS);
   }
@@ -144,121 +120,47 @@ export default function VocabPracticePage() {
     }
   }
 
-  async function handleSubmit() {
-    if (stage !== "ready" && stage !== "feedback-x") return;
-    if (!currentCard) return;
-    const trimmed = answer.trim();
-    if (!trimmed) return;
-
-    setStage("judging");
-    try {
-      const res = await fetch("/api/vocab/judge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowId: currentCard.id, userAnswer: trimmed }),
-      });
-      if (!res.ok) throw new Error(`Judge failed (HTTP ${res.status})`);
-      const data = (await res.json()) as { result: "1" | "X" | "0"; english_description: string };
-
-      if (data.result === "1") {
-        // Fire-and-forget the SRS write so the card dismiss animation
-        // starts instantly. The commit only mutates DB-side state the
-        // user doesn't read back; if it fails the card just reappears
-        // on the next session, no UI lie. This was a ~200-500ms
-        // perceived-latency win on mobile.
-        void fetch("/api/vocab/commit", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rowId: currentCard.id, result: "1", mode: "recognition" }),
-        }).catch(() => {});
-        dismissCurrentAfterCommit();
-      } else if (data.result === "X") {
-        const next = xAttempts + 1;
-        if (next >= MAX_X_ATTEMPTS) {
-          setRevealReason("three-x");
-          setStage("revealed");
-          setAnswer("");
-          fetchExplanation(currentCard.id);
-        } else {
-          setXAttempts(next);
-          setStage("feedback-x");
-          setAnswer("");
-        }
-      } else {
-        // "0" — direct wrong, no retry.
-        setRevealReason("wrong");
-        setStage("revealed");
-        setAnswer("");
-        fetchExplanation(currentCard.id);
-      }
-    } catch (err) {
-      console.error("[vocab/judge]", err);
-      setErrorMessage((err as Error).message);
-      setStage("error");
-    }
-  }
-
-  /** "I don't know" button — user gives up before seeing a verdict. */
-  async function handleDontKnow() {
-    if (stage !== "ready" && stage !== "feedback-x") return;
-    if (!currentCard) return;
-    setRevealReason("gave-up");
+  function handleReveal() {
+    if (stage !== "ready" || !currentCard) return;
     setStage("revealed");
-    setAnswer("");
     fetchExplanation(currentCard.id);
   }
 
-  async function handleNextAfterReveal() {
+  function handleCorrect() {
+    if (!currentCard) return;
+    void fetch("/api/vocab/commit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rowId: currentCard.id, result: "1", mode: "recognition" }),
+    }).catch(() => {});
+    dismissCurrent();
+  }
+
+  function handleWrong() {
     if (!currentCard) return;
     void fetch("/api/vocab/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rowId: currentCard.id, result: "0", mode: "recognition" }),
     }).catch(() => {});
-    dismissCurrentAfterCommit();
+    dismissCurrent();
   }
 
-  // When cards array becomes empty (post-exit), surface the empty state.
+  function handleDelete() {
+    if (!currentCard) return;
+    void fetch("/api/vocab/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rowId: currentCard.id }),
+    }).catch(() => {});
+    dismissCurrent();
+  }
+
   useEffect(() => {
     if (cards.length === 0 && stage !== "loading" && stage !== "exiting" && stage !== "empty" && stage !== "error") {
       setStage("empty");
     }
   }, [cards.length, stage]);
-
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") handleSubmit();
-  }
-
-  function feedbackXMessage(): React.ReactNode {
-    if (!currentCard) return null;
-    if (xAttempts === 1) {
-      return (
-        <>
-          Diese Übersetzung ist korrekt, aber wir suchen eine{" "}
-          <strong>andere Bedeutung</strong> von{" "}
-          <strong>{currentCard.target_word_original}</strong>.
-        </>
-      );
-    }
-    return (
-      <>
-        Kannst du an noch eine weitere Übersetzung für{" "}
-        <strong>{currentCard.target_word_original}</strong> denken?
-      </>
-    );
-  }
-
-  function revealHeading(): string {
-    if (revealReason === "three-x") {
-      return "Du hast die gesuchte Bedeutung nicht getroffen.";
-    }
-    if (revealReason === "gave-up") {
-      return "Antwort:";
-    }
-    return "Falsch — die Antwort war:";
-  }
-
-  const inputDisabled = stage === "judging" || stage === "exiting";
 
   return (
     <main className="min-h-screen bg-neutral-50">
@@ -312,147 +214,83 @@ export default function VocabPracticePage() {
           </div>
         )}
 
-        {(stage === "ready" ||
-          stage === "judging" ||
-          stage === "feedback-x" ||
-          stage === "revealed" ||
-          stage === "exiting") &&
-          currentCard && (
-            <div className="space-y-6">
-              <VocabCardStack
-                cards={cards}
-                exitingId={exitingId}
-                onTapFront={
-                  stage === "ready" || stage === "feedback-x" ? handleDontKnow : undefined
-                }
-                revealed={stage === "revealed"}
-                back={
-                  <CardBack
-                    revealReason={revealReason}
-                    revealHeading={revealHeading()}
-                    explanation={explanation}
-                  />
-                }
-              />
+        {(stage === "ready" || stage === "revealed" || stage === "exiting") && currentCard && (
+          <div className="space-y-6">
+            <VocabCardStack
+              cards={cards}
+              exitingId={exitingId}
+              onTapFront={stage === "ready" ? handleReveal : undefined}
+              revealed={stage === "revealed"}
+              back={<CardBack explanation={explanation} />}
+            />
 
-              {/* Full-width Weiter button, visible only after the flip. */}
-              {stage === "revealed" && (
-                <button
-                  onClick={handleNextAfterReveal}
-                  disabled={explanation === null}
-                  className={`w-full px-4 py-3 rounded-2xl text-white text-base font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                    revealReason === "three-x"
-                      ? "bg-amber-900 hover:bg-amber-800"
-                      : revealReason === "gave-up"
-                      ? "bg-neutral-800 hover:bg-neutral-700"
-                      : "bg-rose-900 hover:bg-rose-800"
-                  }`}
-                >
-                  Weiter →
-                </button>
-              )}
+            {stage === "ready" && (
+              <button
+                onClick={handleReveal}
+                className="w-full px-4 py-3 rounded-2xl bg-neutral-900 text-white text-base font-medium hover:bg-neutral-800 transition-colors"
+              >
+                Antwort zeigen
+              </button>
+            )}
 
-              {/* Input + Antworten + don't-know. */}
-              {stage !== "revealed" && (
-                <div className="space-y-3">
-                  <div className="flex gap-2">
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      value={answer}
-                      onChange={(e) => setAnswer(e.target.value)}
-                      onKeyDown={onKeyDown}
-                      disabled={inputDisabled}
-                      placeholder="Übersetzung eingeben…"
-                      className="flex-1 min-w-0 h-11 px-4 rounded-lg border border-neutral-300 bg-white text-base text-neutral-900 focus:border-neutral-600 focus:outline-none disabled:opacity-50"
-                    />
-                    <button
-                      onClick={handleSubmit}
-                      disabled={inputDisabled || !answer.trim()}
-                      className="shrink-0 h-11 px-5 rounded-lg bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {stage === "judging" ? "…" : "Antworten"}
-                    </button>
-                    <button
-                      onClick={handleDontKnow}
-                      disabled={inputDisabled}
-                      aria-label="Ich weiß die Vokabel nicht"
-                      title="Ich weiß die Vokabel nicht"
-                      className="shrink-0 h-11 w-11 rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
-                    >
-                      <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                        <path
-                          fillRule="evenodd"
-                          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-
-                  {stage === "feedback-x" && (
-                    <p className="text-sm text-amber-700">{feedbackXMessage()}</p>
-                  )}
+            {stage === "revealed" && (
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleWrong}
+                    disabled={explanation === null}
+                    className="flex-1 px-4 py-3 rounded-2xl bg-rose-700 text-white text-base font-medium hover:bg-rose-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Falsch
+                  </button>
+                  <button
+                    onClick={handleCorrect}
+                    disabled={explanation === null}
+                    className="flex-1 px-4 py-3 rounded-2xl bg-emerald-700 text-white text-base font-medium hover:bg-emerald-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Richtig
+                  </button>
                 </div>
-              )}
-            </div>
-          )}
+                <button
+                  onClick={handleDelete}
+                  disabled={explanation === null}
+                  className="w-full px-4 py-2 rounded-xl bg-neutral-100 text-neutral-500 text-sm hover:bg-neutral-200 hover:text-neutral-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Karte entfernen
+                </button>
+              </div>
+            )}
+
+            {stage === "exiting" && (
+              <div className="flex gap-2">
+                <div className="flex-1 px-4 py-3 rounded-2xl bg-neutral-200 h-[50px]" />
+                <div className="flex-1 px-4 py-3 rounded-2xl bg-neutral-200 h-[50px]" />
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </main>
   );
 }
 
-// The back face of the flipped card. Same content the old reveal panel
-// rendered — heading + translation + hint — but laid out to fill the
-// card's bounding box and tinted by revealReason so the colour cue
-// (wrong = rose, three-x = amber, gave-up = neutral) survives the flip.
 interface CardBackProps {
-  revealReason: RevealReason | null;
-  revealHeading: string;
   explanation: Explanation | null;
 }
 
-function CardBack({ revealReason, revealHeading, explanation }: CardBackProps) {
-  const bgClass =
-    revealReason === "three-x"
-      ? "bg-amber-50 border-amber-200"
-      : revealReason === "gave-up"
-      ? "bg-white border-neutral-200"
-      : "bg-rose-50 border-rose-200";
-
-  const headingClass =
-    revealReason === "three-x"
-      ? "text-amber-700"
-      : revealReason === "gave-up"
-      ? "text-neutral-500"
-      : "text-rose-700";
-
-  const translationClass =
-    revealReason === "three-x"
-      ? "text-amber-900"
-      : revealReason === "gave-up"
-      ? "text-neutral-900"
-      : "text-rose-900";
-
-  const hintClass =
-    revealReason === "three-x"
-      ? "text-amber-800"
-      : revealReason === "gave-up"
-      ? "text-neutral-600"
-      : "text-rose-800";
-
+function CardBack({ explanation }: CardBackProps) {
   return (
-    <div className={`w-full h-full rounded-2xl border shadow-sm flex flex-col items-center justify-center text-center px-6 py-8 ${bgClass}`}>
-      <p className={`text-xs uppercase tracking-wider ${headingClass}`}>{revealHeading}</p>
+    <div className="w-full h-full rounded-2xl border border-neutral-200 shadow-sm bg-white flex flex-col items-center justify-center text-center px-6 py-8">
+      <p className="text-xs uppercase tracking-wider text-neutral-400">Antwort</p>
       {explanation === null ? (
         <p className="mt-3 text-sm italic text-neutral-400">Antwort wird geladen…</p>
       ) : (
         <>
-          <p className={`mt-3 text-2xl font-medium ${translationClass}`}>
+          <p className="mt-3 text-2xl font-medium text-neutral-900">
             {explanation.translation}
           </p>
           {explanation.hint && (
-            <p className={`mt-2 text-sm ${hintClass}`}>{explanation.hint}</p>
+            <p className="mt-2 text-sm text-neutral-600">{explanation.hint}</p>
           )}
         </>
       )}
