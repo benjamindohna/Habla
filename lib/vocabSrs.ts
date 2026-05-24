@@ -14,7 +14,7 @@
 import { db } from "./db";
 import { userVocab } from "./schema";
 import { and, eq, sql } from "drizzle-orm";
-import { MAX_STAGE, STAGE_INTERVALS_SECONDS, type VocabJudgement } from "./vocab";
+import { MAX_STAGE, STAGE_INTERVALS_SECONDS, projectNextStage, type VocabJudgement } from "./vocab";
 
 export type VocabMode = "recognition" | "sentence";
 
@@ -89,16 +89,25 @@ export async function getDueVocabQueue(
 /**
  * Apply the SRS state change for a row given the judge verdict and mode.
  *
- * "0": stage_for_mode = MAX(0, FLOOR(/2));  last_seen = now; looked_up += 1.
- * "1": stage_for_mode = MIN(MAX_STAGE, +1); last_seen = now + fuzz; looked_up += 1.
- * "2": stage_for_mode = MIN(MAX_STAGE, +2); last_seen = now + fuzz; looked_up += 1.
- * "X": no-op — caller should not invoke this with X verdicts.
+ * Verdict → new stage delegates to projectNextStage() — single source of
+ * truth shared with the UI's "wann kommt's wieder"-preview. Don't reproduce
+ * the +1 / +2 / floor(/2) arithmetic here.
  *
- * Anti-cluster fuzz (Anki-style): on a positive verdict the
- * effective last_seen is offset by a random ±10% of the NEW stage's
- * interval. This prevents the entire vocab batch from a single
- * conversation reappearing synchronously every interval. No fuzz on
- * "0" lapses — the user needs that card back at the floor immediately.
+ *   "0": stage = floor(stage / 2); last_seen = now (no fuzz).
+ *   "1": stage += 1 (capped);      last_seen = now + fuzz.
+ *   "2": stage += 2 (capped);      last_seen = now + fuzz.
+ *   "X": no-op.
+ *
+ * Anti-cluster fuzz (Anki-style): on a positive verdict last_seen gets
+ * a random [0, +15%] of the NEW stage's interval added — so the batch
+ * of words saved from one conversation drifts apart over time instead
+ * of all coming due synchronously. Only-positive so we never push
+ * last_seen into the past, which would risk falsely triggering the
+ * soft-lapse-on-re-tap path in vocabSave (it uses last_seen <
+ * now-cooldown as its trigger). Slight ~+7.5% mean shift on intervals
+ * — negligible vs. the cluster-breaking benefit. No fuzz on "0"
+ * lapses: the floored card needs to come back at the floor interval
+ * exactly, not a tick later.
  *
  * Only the stage column for the queried mode is touched. The other
  * mode's stage stays unchanged.
@@ -115,43 +124,23 @@ export async function applyJudgeResult(
   const stageCol = stageColumnExpr(mode);
   const stageKey = mode === "sentence" ? "stageSentence" : "stage";
 
-  // Compute the new stage in JS so we can derive the fuzz amount from
-  // the resulting interval. The DB-side LEAST/GREATEST below is the
-  // authoritative write, but for the fuzz we need the projected value.
   const current = await db
     .select({ stage: stageCol })
     .from(userVocab)
     .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)))
     .limit(1);
   const currentStage = current[0]?.stage ?? 0;
+  const newStage = projectNextStage(currentStage, judge);
 
-  if (judge === "0") {
-    await db
-      .update(userVocab)
-      .set({
-        [stageKey]: sql`GREATEST(0, ${stageCol} / 2)`,
-        lastSeen: now,
-        lookedUp: sql`${userVocab.lookedUp} + 1`,
-      })
-      .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
-    return;
-  }
-
-  const newStage =
-    judge === "2"
-      ? Math.min(MAX_STAGE, currentStage + 2)
-      : Math.min(MAX_STAGE, currentStage + 1);
+  const isLapse = judge === "0";
   const intervalSeconds = STAGE_INTERVALS_SECONDS[newStage];
-  // ±10% fuzz. Random per commit, not per card — deterministic-per-card
-  // would re-sync over time as cards land on the same offset.
-  const fuzz = Math.round((Math.random() * 0.2 - 0.1) * intervalSeconds);
-  const fuzzedLastSeen = now + fuzz;
+  const fuzz = isLapse ? 0 : Math.round(Math.random() * 0.15 * intervalSeconds);
 
   await db
     .update(userVocab)
     .set({
       [stageKey]: sql.raw(String(newStage)),
-      lastSeen: fuzzedLastSeen,
+      lastSeen: now + fuzz,
       lookedUp: sql`${userVocab.lookedUp} + 1`,
     })
     .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
