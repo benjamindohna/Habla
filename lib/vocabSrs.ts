@@ -89,9 +89,16 @@ export async function getDueVocabQueue(
 /**
  * Apply the SRS state change for a row given the judge verdict and mode.
  *
- * "1": stage_for_mode = MIN(MAX_STAGE, +1); last_seen = now; looked_up += 1.
  * "0": stage_for_mode = MAX(0, FLOOR(/2));  last_seen = now; looked_up += 1.
+ * "1": stage_for_mode = MIN(MAX_STAGE, +1); last_seen = now + fuzz; looked_up += 1.
+ * "2": stage_for_mode = MIN(MAX_STAGE, +2); last_seen = now + fuzz; looked_up += 1.
  * "X": no-op — caller should not invoke this with X verdicts.
+ *
+ * Anti-cluster fuzz (Anki-style): on a positive verdict the
+ * effective last_seen is offset by a random ±10% of the NEW stage's
+ * interval. This prevents the entire vocab batch from a single
+ * conversation reappearing synchronously every interval. No fuzz on
+ * "0" lapses — the user needs that card back at the floor immediately.
  *
  * Only the stage column for the queried mode is touched. The other
  * mode's stage stays unchanged.
@@ -106,26 +113,46 @@ export async function applyJudgeResult(
 
   const now = Math.floor(Date.now() / 1000);
   const stageCol = stageColumnExpr(mode);
-  const stageColName = mode === "sentence" ? "stage_sentence" : "stage";
+  const stageKey = mode === "sentence" ? "stageSentence" : "stage";
 
-  if (judge === "1") {
+  // Compute the new stage in JS so we can derive the fuzz amount from
+  // the resulting interval. The DB-side LEAST/GREATEST below is the
+  // authoritative write, but for the fuzz we need the projected value.
+  const current = await db
+    .select({ stage: stageCol })
+    .from(userVocab)
+    .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)))
+    .limit(1);
+  const currentStage = current[0]?.stage ?? 0;
+
+  if (judge === "0") {
     await db
       .update(userVocab)
       .set({
-        [mode === "sentence" ? "stageSentence" : "stage"]: sql`LEAST(${MAX_STAGE}, ${stageCol} + 1)`,
+        [stageKey]: sql`GREATEST(0, ${stageCol} / 2)`,
         lastSeen: now,
         lookedUp: sql`${userVocab.lookedUp} + 1`,
       })
       .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
-  } else {
-    await db
-      .update(userVocab)
-      .set({
-        [mode === "sentence" ? "stageSentence" : "stage"]: sql`GREATEST(0, ${stageCol} / 2)`,
-        lastSeen: now,
-        lookedUp: sql`${userVocab.lookedUp} + 1`,
-      })
-      .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
+    return;
   }
-  void stageColName;
+
+  const newStage =
+    judge === "2"
+      ? Math.min(MAX_STAGE, currentStage + 2)
+      : Math.min(MAX_STAGE, currentStage + 1);
+  const intervalSeconds = STAGE_INTERVALS_SECONDS[newStage];
+  // ±10% fuzz. Random per commit, not per card — deterministic-per-card
+  // would re-sync over time as cards land on the same offset.
+  const fuzz = Math.round((Math.random() * 0.2 - 0.1) * intervalSeconds);
+  const fuzzedLastSeen = now + fuzz;
+
+  await db
+    .update(userVocab)
+    .set({
+      [stageKey]: sql.raw(String(newStage)),
+      lastSeen: fuzzedLastSeen,
+      lookedUp: sql`${userVocab.lookedUp} + 1`,
+    })
+    .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
 }

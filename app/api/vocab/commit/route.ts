@@ -5,14 +5,14 @@ import type { VocabJudgement } from "@/lib/vocab";
 
 /**
  * Apply the SRS state change for a card, scoped to the practice mode.
- * Called by the client at the end of an attempt cycle:
- *   - on a "1" success (stage advances by 1 for the given mode)
- *   - on a "0" give-up after 3 failed tries (stage halves)
- *
- * "X" verdicts never commit — they're no-ops in the SRS model.
+ * Called by the client after the learner self-judges the revealed card:
+ *   - "0" — Falsch:    stage = floor(stage / 2)
+ *   - "1" — Gut:       stage + 1
+ *   - "2" — Sehr gut:  stage + 2  (Anki "Easy" — skips a level)
+ *   - "X" — no-op (still used by the sentence-mode judge)
  *
  * Body:
- *   { rowId: number, result: "1" | "0" | "X", mode: "recognition" | "sentence" }
+ *   { rowId: number, result: "0" | "1" | "2" | "X", mode: "recognition" | "sentence" }
  *
  * mode defaults to "recognition" if absent (backwards-compat).
  */
@@ -30,8 +30,8 @@ export async function POST(req: NextRequest) {
   if (typeof rowId !== "number" || !Number.isFinite(rowId) || rowId <= 0) {
     return NextResponse.json({ error: "rowId required" }, { status: 400 });
   }
-  if (result !== "1" && result !== "0" && result !== "X") {
-    return NextResponse.json({ error: "result must be 1, 0 or X" }, { status: 400 });
+  if (result !== "1" && result !== "0" && result !== "2" && result !== "X") {
+    return NextResponse.json({ error: "result must be 0, 1, 2 or X" }, { status: 400 });
   }
   const mode: VocabMode = body.mode === "sentence" ? "sentence" : "recognition";
 

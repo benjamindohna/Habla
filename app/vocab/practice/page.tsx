@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import VocabCardStack, { type VocabCardData } from "@/components/VocabCardStack";
+import {
+  STAGE_INTERVALS_SECONDS,
+  formatStageInterval,
+  projectNextStage,
+} from "@/lib/vocab";
 
 type Stage = "loading" | "ready" | "revealed" | "exiting" | "empty" | "error";
 
@@ -126,22 +131,12 @@ export default function VocabPracticePage() {
     fetchExplanation(currentCard.id);
   }
 
-  function handleCorrect() {
+  function commitAndDismiss(result: "0" | "1" | "2") {
     if (!currentCard) return;
     void fetch("/api/vocab/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rowId: currentCard.id, result: "1", mode: "recognition" }),
-    }).catch(() => {});
-    dismissCurrent();
-  }
-
-  function handleWrong() {
-    if (!currentCard) return;
-    void fetch("/api/vocab/commit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rowId: currentCard.id, result: "0", mode: "recognition" }),
+      body: JSON.stringify({ rowId: currentCard.id, result, mode: "recognition" }),
     }).catch(() => {});
     dismissCurrent();
   }
@@ -236,20 +231,33 @@ export default function VocabPracticePage() {
             {stage === "revealed" && (
               <div className="space-y-3">
                 <div className="flex gap-2">
-                  <button
-                    onClick={handleWrong}
+                  <RevealButton
+                    label="Falsch"
+                    intervalLabel={formatStageInterval(
+                      STAGE_INTERVALS_SECONDS[projectNextStage(currentCard.stage, "0")],
+                    )}
+                    color="rose"
                     disabled={explanation === null}
-                    className="flex-1 px-4 py-3 rounded-2xl bg-rose-700 text-white text-base font-medium hover:bg-rose-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Falsch
-                  </button>
-                  <button
-                    onClick={handleCorrect}
+                    onClick={() => commitAndDismiss("0")}
+                  />
+                  <RevealButton
+                    label="Gut"
+                    intervalLabel={formatStageInterval(
+                      STAGE_INTERVALS_SECONDS[projectNextStage(currentCard.stage, "1")],
+                    )}
+                    color="emerald"
                     disabled={explanation === null}
-                    className="flex-1 px-4 py-3 rounded-2xl bg-emerald-700 text-white text-base font-medium hover:bg-emerald-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Richtig
-                  </button>
+                    onClick={() => commitAndDismiss("1")}
+                  />
+                  <RevealButton
+                    label="Sehr gut"
+                    intervalLabel={formatStageInterval(
+                      STAGE_INTERVALS_SECONDS[projectNextStage(currentCard.stage, "2")],
+                    )}
+                    color="sky"
+                    disabled={explanation === null}
+                    onClick={() => commitAndDismiss("2")}
+                  />
                 </div>
                 <button
                   onClick={handleDelete}
@@ -263,14 +271,44 @@ export default function VocabPracticePage() {
 
             {stage === "exiting" && (
               <div className="flex gap-2">
-                <div className="flex-1 px-4 py-3 rounded-2xl bg-neutral-200 h-[50px]" />
-                <div className="flex-1 px-4 py-3 rounded-2xl bg-neutral-200 h-[50px]" />
+                <div className="flex-1 rounded-2xl bg-neutral-200 h-[68px]" />
+                <div className="flex-1 rounded-2xl bg-neutral-200 h-[68px]" />
+                <div className="flex-1 rounded-2xl bg-neutral-200 h-[68px]" />
               </div>
             )}
           </div>
         )}
       </div>
     </main>
+  );
+}
+
+type RevealButtonColor = "rose" | "emerald" | "sky";
+
+interface RevealButtonProps {
+  label: string;
+  intervalLabel: string;
+  color: RevealButtonColor;
+  disabled: boolean;
+  onClick: () => void;
+}
+
+function RevealButton({ label, intervalLabel, color, disabled, onClick }: RevealButtonProps) {
+  const colorClass =
+    color === "rose"
+      ? "bg-rose-700 hover:bg-rose-800"
+      : color === "emerald"
+      ? "bg-emerald-700 hover:bg-emerald-800"
+      : "bg-sky-700 hover:bg-sky-800";
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex-1 px-3 py-2 rounded-2xl text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-0.5 ${colorClass}`}
+    >
+      <span className="text-base font-medium leading-tight">{label}</span>
+      <span className="text-xs opacity-75 tabular-nums leading-tight">{intervalLabel}</span>
+    </button>
   );
 }
 

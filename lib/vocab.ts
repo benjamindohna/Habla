@@ -163,12 +163,15 @@ Return ONLY the description string. No JSON, no quotes, no explanation.`;
   return cleaned;
 }
 
-// VocabJudgement — verdict for an SRS commit. Recognition mode now uses
-// self-judging in the UI (user picks Falsch / Richtig after revealing
-// the answer), so only "1" and "0" are emitted from that flow. "X" is
-// kept for the sentence-mode judge (lib/vocabSentenceJudge.ts), which
-// still produces three-way verdicts the SRS code treats as no-ops.
-export type VocabJudgement = "1" | "X" | "0";
+// VocabJudgement — verdict for an SRS commit. Recognition mode uses
+// self-judging in the UI; the learner picks Falsch / Gut / Sehr gut
+// after revealing the answer:
+//   "0" — wrong: stage = floor(stage / 2)
+//   "1" — good:  stage + 1
+//   "2" — easy:  stage + 2 (caps at MAX_STAGE)
+// "X" is still emitted by the sentence-mode judge (lib/vocabSentenceJudge.ts)
+// and is treated as a no-op by the SRS code.
+export type VocabJudgement = "1" | "X" | "0" | "2";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Vocab comparator — at save time, when the target_word_lower of the new
@@ -404,15 +407,16 @@ export async function canonicalizeVocab(
 
 // ─────────────────────────────────────────────────────────────────────────
 // SRS scheduling constants. Anki SM-2's typical "good"-trajectory mapped
-// onto a discrete 10-stage ladder. Stage 0 means "fresh / just failed —
-// re-show in 1 minute". Stage 9 means "essentially permanent — re-show
-// in ~4 years". On a "1" verdict the card advances by one stage; on "0"
-// the stage halves (Math.floor(stage / 2)); on "X" nothing happens
-// (the card stays in the queue at the same stage and last_seen).
+// onto a discrete 10-stage ladder. Stage 0 = "fresh after save / just
+// recovered from a lapse — re-show in 10 minutes" (the Anki "learning
+// step" — gives the learner a same-session reinforcement before the
+// first 24h interval). Stage 9 = "essentially permanent — re-show in
+// ~4 years". On a "1" verdict stage += 1; on "2" stage += 2 (capped);
+// on "0" stage = floor(stage / 2); on "X" nothing happens.
 // ─────────────────────────────────────────────────────────────────────────
 
 export const STAGE_INTERVALS_SECONDS = [
-  60,           // stage 0:  1 min
+  600,          // stage 0:  10 min  (same-session learning step)
   86_400,       // stage 1:  1 day
   216_000,      // stage 2:  2.5 days
   518_400,      // stage 3:  6 days
@@ -425,3 +429,35 @@ export const STAGE_INTERVALS_SECONDS = [
 ];
 
 export const MAX_STAGE = STAGE_INTERVALS_SECONDS.length - 1;
+
+/**
+ * Render a stage interval (seconds) as a short German label for UI
+ * preview ("wann kommt die Karte wieder"). Designed for the three
+ * reveal-buttons in the practice page; uses round numbers, not exact
+ * arithmetic — the user wants a feel, not a stopwatch.
+ */
+export function formatStageInterval(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
+  if (seconds < 86_400) return `${Math.round(seconds / 3600)} h`;
+  const days = seconds / 86_400;
+  if (days < 1.5) return "1 Tag";
+  if (days < 14) return `${days < 10 ? days.toFixed(1).replace(".0", "") : Math.round(days)} Tage`;
+  if (days < 60) return `${Math.round(days / 7)} Wo.`;
+  if (days < 365) return `${Math.round(days / 30)} Mon.`;
+  const years = days / 365;
+  return years < 10 ? `${years.toFixed(1).replace(".0", "")} J.` : `${Math.round(years)} J.`;
+}
+
+/**
+ * Compute the stage a card would land in if the learner clicked the
+ * given verdict — used by the UI to render "in X kommt die Karte
+ * wieder" labels under the three reveal-buttons. Mirrors the branches
+ * in applyJudgeResult exactly. "X" is a no-op (same stage).
+ */
+export function projectNextStage(currentStage: number, verdict: VocabJudgement): number {
+  if (verdict === "0") return Math.max(0, Math.floor(currentStage / 2));
+  if (verdict === "1") return Math.min(MAX_STAGE, currentStage + 1);
+  if (verdict === "2") return Math.min(MAX_STAGE, currentStage + 2);
+  return currentStage;
+}
