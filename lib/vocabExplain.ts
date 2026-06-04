@@ -82,20 +82,23 @@ CRITICAL — synonyms ≠ senses. A "sense" is a DIFFERENT MEANING the word can 
 If you have nothing that meets the "auch:" bar, omit "auch:" entirely. A card with one clean primary translation is better than a card with a fake second sense.
 
 Format the translation as a compact readable string. Pattern:
-  <primary translation>; Synonyme: <syn1>, <syn2>; auch: <other sense> (<short tag>)
-Drop any section that doesn't apply. Keep it tight — this is shown on a flashcard, not a dictionary entry. Use ${args.native_language} for the section labels (the example uses German; adapt to the learner's native language).
+  <primary translation>; Synonyme: <syn1>, <syn2>; auch: <sense> (<tag>); auch: <sense> (<tag>)
+Use as many \`auch:\` entries as the word actually has distinct senses — DO NOT stop at one. A truly polysemous noun like Spanish "piso" has three (apartment / floor-storey / floor-surface); "banco" has two (financial / bench); "vela" has two (candle / sail). Don't pad either — only add \`auch:\` entries that meet the synonym-vs-sense test above. Drop any section that doesn't apply. Keep it tight — this is shown on a flashcard, not a dictionary entry. Use ${args.native_language} for the section labels (the example uses German; adapt to the learner's native language).
 
 THE HINT is one short ${args.native_language} sentence (≤15 words) giving a typical usage example or memory aid. Use the anchored sense. Ends with a period.
 
 ═════ WORKED EXAMPLES (Spanish target, German native — illustrative; same logic applies to any language pair) ═════
 
-Polysemy within the same word class — surface both:
+Polysemy within the same word class — surface ALL the distinct senses, not just one:
 - "banco" (sense: "financial institution / bank")
     → translation: "die Bank (Geldinstitut); auch: die Sitzbank (Möbel)"
        hint: "Zur Bank gehen, um Geld abzuheben."
 - "vela" (sense: "candle for lighting")
     → translation: "die Kerze; auch: das Segel (am Boot)"
        hint: "Eine Kerze anzünden."
+- "piso" (sense: "apartment / flat") — THREE senses, list all:
+    → translation: "die Wohnung; Synonyme: das Apartment; auch: das Stockwerk (Gebäude); auch: der Boden (Fußboden)"
+       hint: "Eine Wohnung in der Stadt kaufen."
 
 Cross-POS homographs — do NOT mention the other word:
 - "vino" (sense: "wine / alcoholic drink from grapes")
