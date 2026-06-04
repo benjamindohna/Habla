@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
 import { db } from "@/lib/db";
 import { userVocab } from "@/lib/schema";
@@ -12,6 +13,7 @@ import { generateTts } from "@/lib/vocabTts";
  * persist on the row, return.
  */
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/vocab/tts", async () => {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   const user = await getUserById(session.userId);
@@ -56,4 +58,5 @@ export async function POST(req: NextRequest) {
     console.error("[/api/vocab/tts]", err);
     return NextResponse.json({ error: "TTS generation failed" }, { status: 500 });
   }
+  });
 }

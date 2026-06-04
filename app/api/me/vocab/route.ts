@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
 import { saveVocabEntry } from "@/lib/vocabSave";
 import { db } from "@/lib/db";
@@ -20,6 +21,7 @@ import { and, asc, eq } from "drizzle-orm";
  * for the playground save-test view.
  */
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/me/vocab", async () => {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -55,6 +57,7 @@ export async function POST(req: NextRequest) {
     console.error("[/api/me/vocab POST]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
+  });
 }
 
 /**

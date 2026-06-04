@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
 import {
   interpret,
@@ -21,6 +22,7 @@ import type { CorrectionResult } from "@/types/correction";
  * fresh correction against their own interpretation.
  */
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/correct", async () => {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   const user = await getUserById(session.userId);
@@ -114,4 +116,5 @@ export async function POST(req: NextRequest) {
     console.error("[/api/correct]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
+  });
 }

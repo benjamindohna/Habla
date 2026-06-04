@@ -3,8 +3,10 @@ import { getOpenAI, TASK_MODELS, logAudioUsage } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
 import { getPromptExamples } from "@/lib/promptExamples";
+import { withRouteUsage } from "@/lib/usageContext";
 
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/tts", async () => {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -53,4 +55,5 @@ export async function POST(req: NextRequest) {
     console.error("[/api/tts]", err);
     return NextResponse.json({ error: "TTS generation failed" }, { status: 500 });
   }
+  });
 }

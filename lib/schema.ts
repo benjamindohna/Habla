@@ -164,6 +164,37 @@ export const userVocab = pgTable(
   }),
 );
 
+// ── llm_usage ────────────────────────────────────────────────────────────
+// One row per LLM/audio API call. Written fire-and-forget from logUsage /
+// logAudioUsage in lib/llm.ts. user_id is nullable: scripts and pre-auth
+// calls (e.g. login) have no user context, but they're still worth
+// recording for total-spend accounting. Cost is computed at insert time
+// from lib/llmPricing.ts using whatever counts the API returned.
+
+export const llmUsage = pgTable(
+  "llm_usage",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: integer("created_at").notNull().default(nowSeconds),
+    label: text("label").notNull(),               // caller tag, e.g. "vocab/explain"
+    model: text("model").notNull(),               // e.g. "gpt-4o-mini"
+    kind: text("kind").notNull(),                 // 'chat' | 'transcription' | 'tts'
+    promptTokens: integer("prompt_tokens"),       // chat only
+    completionTokens: integer("completion_tokens"), // chat only
+    reasoningTokens: integer("reasoning_tokens"), // chat only (xAI reasoning leak)
+    inputChars: integer("input_chars"),           // tts (text length)
+    inputBytes: integer("input_bytes"),           // transcription (audio bytes)
+    outputBytes: integer("output_bytes"),         // tts (audio bytes)
+    costUsd: text("cost_usd"),                    // stored as text to avoid float drift; "0.000123"
+    route: text("route"),                         // HTTP route, when set via withUsageContext
+  },
+  (t) => ({
+    userTimeIdx: index("idx_llm_usage_user_time").on(t.userId, t.createdAt),
+    timeIdx: index("idx_llm_usage_time").on(t.createdAt),
+  }),
+);
+
 // ── inferred row + insert types ──────────────────────────────────────────
 // Drizzle gives us $inferSelect / $inferInsert per table; the app uses
 // those instead of hand-written interfaces.
@@ -174,3 +205,5 @@ export type ConversationRow = typeof conversations.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
 export type TopicSetRow = typeof topicSets.$inferSelect;
 export type UserVocabRow = typeof userVocab.$inferSelect;
+export type LlmUsageRow = typeof llmUsage.$inferSelect;
+export type LlmUsageInsert = typeof llmUsage.$inferInsert;

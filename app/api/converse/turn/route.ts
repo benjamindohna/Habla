@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatText, type ChatMessage } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
+import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
 import { describeTargetLanguage } from "@/lib/targetLanguage";
 import { describeLevelForPrompt } from "@/lib/levels";
@@ -19,6 +20,7 @@ import type { Pair } from "@/types/correction";
  * on tap. AI side stores no segments.
  */
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/converse/turn", async () => {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -148,4 +150,5 @@ Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no
     console.error("[/api/converse/turn]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
+  });
 }

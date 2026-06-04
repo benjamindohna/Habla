@@ -3,8 +3,10 @@ import { toFile } from "openai";
 import { getOpenAI, TASK_MODELS, logAudioUsage } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
 import { getUserById } from "@/lib/users";
+import { withRouteUsage } from "@/lib/usageContext";
 
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/transcribe", async () => {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -41,4 +43,5 @@ export async function POST(req: NextRequest) {
     console.error("[/api/transcribe]", err);
     return NextResponse.json({ error: "Transcription failed" }, { status: 500 });
   }
+  });
 }

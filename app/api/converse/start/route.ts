@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatText } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
+import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
 import { describeTargetLanguage } from "@/lib/targetLanguage";
 import { describeLevelForPrompt } from "@/lib/levels";
@@ -24,6 +25,7 @@ import {
  * In both cases the AI opener becomes the conversation's first message.
  */
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/converse/start", async () => {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -102,4 +104,5 @@ Return ONLY the message text in ${targetName}. No JSON, no quotes, no preamble, 
     console.error("[/api/converse/start]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
+  });
 }

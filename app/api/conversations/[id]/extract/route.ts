@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatJSON } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
+import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById, getUserInterests, setUserInterests, setUserInterestsText } from "@/lib/users";
 import { getConversation, getMessages, markConversationEnded } from "@/lib/conversations";
 import { generateAndStoreNext, invalidateNextSet } from "@/lib/topicSets";
@@ -12,6 +13,7 @@ const MAX_TAGS = 12;
 const RECENT_TAGS = 5;
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  return withRouteUsage("/api/conversations/[id]/extract", async () => {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -125,4 +127,5 @@ Return ONLY valid JSON:
     console.error("[/api/conversations/:id/extract]", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
+  });
 }

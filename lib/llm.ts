@@ -1,4 +1,8 @@
 import OpenAI from "openai";
+import { db } from "./db";
+import { llmUsage } from "./schema";
+import { getUsageContext } from "./usageContext";
+import { estimateCostUsd } from "./llmPricing";
 
 /**
  * Single source of truth for which model handles which task. Routes pick
@@ -130,12 +134,45 @@ function shouldLog(): boolean {
 }
 
 function logUsage(label: string, model: string, usage: Usage | undefined): void {
-  if (!shouldLog() || !usage) return;
+  if (!usage) return;
   const reasoning = usage.completion_tokens_details?.reasoning_tokens;
-  const reasoningPart = reasoning && reasoning > 0 ? ` reasoning=${reasoning}` : "";
-  console.log(
-    `[llm] ${label} model=${model} prompt=${usage.prompt_tokens ?? "?"} completion=${usage.completion_tokens ?? "?"}${reasoningPart} total=${usage.total_tokens ?? "?"}`,
-  );
+
+  if (shouldLog()) {
+    const reasoningPart = reasoning && reasoning > 0 ? ` reasoning=${reasoning}` : "";
+    console.log(
+      `[llm] ${label} model=${model} prompt=${usage.prompt_tokens ?? "?"} completion=${usage.completion_tokens ?? "?"}${reasoningPart} total=${usage.total_tokens ?? "?"}`,
+    );
+  }
+
+  // Persist to llm_usage (fire-and-forget). Errors are swallowed —
+  // analytics must never break a real LLM call. user_id + route come
+  // from the AsyncLocalStorage context set at route entry; if absent,
+  // both are null and the row still has the counts.
+  const ctx = getUsageContext();
+  const promptTokens = usage.prompt_tokens ?? null;
+  const completionTokens = usage.completion_tokens ?? null;
+  const costUsd = estimateCostUsd({
+    model,
+    kind: "chat",
+    promptTokens: promptTokens ?? undefined,
+    completionTokens: completionTokens ?? undefined,
+  });
+  void db
+    .insert(llmUsage)
+    .values({
+      userId: ctx?.userId ?? null,
+      label,
+      model,
+      kind: "chat",
+      promptTokens,
+      completionTokens,
+      reasoningTokens: reasoning ?? null,
+      costUsd,
+      route: ctx?.route ?? null,
+    })
+    .catch((err) => {
+      console.warn(`[llm-usage] insert failed for ${label}:`, (err as Error).message);
+    });
 }
 
 /**
@@ -154,13 +191,43 @@ export function logAudioUsage(
     outputChars?: number;
   },
 ): void {
-  if (!shouldLog()) return;
-  const parts = [`[llm] ${label} model=${model}`];
-  if (signals.inputBytes !== undefined) parts.push(`inputBytes=${signals.inputBytes}`);
-  if (signals.inputChars !== undefined) parts.push(`inputChars=${signals.inputChars}`);
-  if (signals.outputBytes !== undefined) parts.push(`outputBytes=${signals.outputBytes}`);
-  if (signals.outputChars !== undefined) parts.push(`outputChars=${signals.outputChars}`);
-  console.log(parts.join(" "));
+  if (shouldLog()) {
+    const parts = [`[llm] ${label} model=${model}`];
+    if (signals.inputBytes !== undefined) parts.push(`inputBytes=${signals.inputBytes}`);
+    if (signals.inputChars !== undefined) parts.push(`inputChars=${signals.inputChars}`);
+    if (signals.outputBytes !== undefined) parts.push(`outputBytes=${signals.outputBytes}`);
+    if (signals.outputChars !== undefined) parts.push(`outputChars=${signals.outputChars}`);
+    console.log(parts.join(" "));
+  }
+
+  // Same fire-and-forget DB persistence as logUsage above. Kind is
+  // inferred from the model — transcription models go to transcription,
+  // tts models go to tts; everything else gets "tts" as a fallback
+  // (we don't currently call this for anything else).
+  const ctx = getUsageContext();
+  const kind: "transcription" | "tts" = /transcribe/i.test(model) ? "transcription" : "tts";
+  const costUsd = estimateCostUsd({
+    model,
+    kind,
+    inputBytes: signals.inputBytes,
+    outputBytes: signals.outputBytes,
+  });
+  void db
+    .insert(llmUsage)
+    .values({
+      userId: ctx?.userId ?? null,
+      label,
+      model,
+      kind,
+      inputChars: signals.inputChars ?? null,
+      inputBytes: signals.inputBytes ?? null,
+      outputBytes: signals.outputBytes ?? null,
+      costUsd,
+      route: ctx?.route ?? null,
+    })
+    .catch((err) => {
+      console.warn(`[llm-usage] insert failed for ${label}:`, (err as Error).message);
+    });
 }
 
 /**

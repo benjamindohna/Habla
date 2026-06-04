@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatText } from "@/lib/llm";
 import { getSession } from "@/lib/auth";
+import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
 import { describeTargetLanguage, type TargetLanguageSpec } from "@/lib/targetLanguage";
 
@@ -81,6 +82,7 @@ Worked example (illustrative — Spanish target, German native; pattern applies 
 }
 
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/explain", async () => {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -132,4 +134,5 @@ export async function POST(req: NextRequest) {
     console.error("[/api/explain]", err);
     return NextResponse.json({ error: "Explanation failed" }, { status: 500 });
   }
+  });
 }

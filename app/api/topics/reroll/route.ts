@@ -6,8 +6,10 @@ import {
   generateAndStoreNext,
   getCurrentSet,
 } from "@/lib/topicSets";
+import { withRouteUsage } from "@/lib/usageContext";
 
 export async function POST() {
+  return withRouteUsage("/api/topics/reroll", async () => {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -29,4 +31,5 @@ export async function POST() {
   );
 
   return NextResponse.json({ topics });
+  });
 }
