@@ -272,3 +272,43 @@ Some of these are independent (1, 5). Others are more cohesive — (2) and (5) b
 ## Adding new ideas
 
 When a new idea comes up: add as a new section here using the same shape. Don't worry about ordering — eventually we group / prune / promote items into ROADMAP.md once a build plan crystallises.
+
+---
+
+## 10. "Explain further" button on vocab cards
+
+**What it is**
+
+A small button on the back of a vocab card that, on tap, fetches a deeper explanation: a few example sentences in both target and native language showing the word in use, plus a short grammatical / usage note. Lazy — only fired when the user explicitly asks, so the card's main face stays short and scannable.
+
+**Why it's interesting**
+
+The new explain pipeline (word + word_class only, no context, no hint) keeps cards short and clean — just the meanings. But sometimes the learner wants more: how is this word actually used? In what register? What's the typical sentence shape? A separate on-demand call answers exactly that, without bloating every card with information most users won't need.
+
+**Implementation sketch**
+
+- New route `/api/vocab/explain-further` taking the `rowId`.
+- Reads `target_word`, current `native_translation`, `word_class` from the row. **No** `context_sentence` — the further-explanation is context-independent on purpose, same as the basic translation.
+- LLM call (chat_precise) with a prompt like:
+  ```
+  Give a learner studying {target_language} (native: {native_language})
+  a deeper look at the word "{word}" ({word_class}). The basic
+  translation they've already seen: "{native_translation}".
+  Return:
+    - 3 example sentences in {target_language}, each with a
+      {native_language} translation.
+    - 1-2 sentence note on usage / register / common pitfalls.
+  ```
+- Cache the result on the row (new columns: `further_explanation_examples_json`, `further_explanation_note`) so repeat taps are instant. Async-generate on first tap, store, return.
+- UI: small "?"-icon below the translation. Tap → expandable section appears with examples + note. Collapsed by default.
+
+**Cost**
+
+- ~$0.002-0.005 per first-explain call (chat_precise, ~400-600 output tokens).
+- Once cached, free. Most users will tap on a small fraction of cards.
+
+**Open questions**
+
+- When the basic translation changes (e.g. a regen via reExplainAll), should the cached further-explanation be invalidated? Probably yes — set the cache columns to null on translation update.
+- Should this also work in the new themes-mode chat cards? Same row in `user_vocab` either way, so yes automatically.
+- Audio for the example sentences? Out of v1 scope.
