@@ -124,11 +124,15 @@ Three paths into Theme creation:
 
 The "Neues Thema"-page mixes three sources:
 
-1. **Universal Themes** (statically curated): Smalltalk, Restaurant bestellen, Arzt-Besuch, Wohnung mieten, Job-Interview, Flughafen, Telefonat auf Spanisch, Erstes Date, Heimwerker-Shop, Vorstellung neuer Freunde, Familienfeier, Sport-Smalltalk. About a dozen of these, hand-written for each target language.
-2. **Personalized suggestions** based on user interests + chat history. LLM call: "given the user's interests `{x, y, z}` and recent chat themes `{a, b}`, suggest 4-6 specific Theme ideas they'd plausibly want." Output is a list of `{title, one-sentence-pitch}`.
+1. **The Theme Catalogue** — a system-wide pool of pre-curated Themes, stored in a separate `theme_catalogue` table (NOT per-user). Examples: Smalltalk, Restaurant bestellen, Arzt-Besuch, Wohnung mieten, Job-Interview, Flughafen, Telefonat, Erstes Date, Heimwerker-Shop, Vorstellung neuer Freunde, Familienfeier, Sport-Smalltalk, Klassische spanische Phrasen, Reise-Smalltalk, Zahlen + Zeit. ~15-20 entries per target language, hand-authored for high quality. Each has a name, scenario_description, goal_description, and an optional pre-defined vocabulary list (so first-level generation can skip the LLM call and use a curated word list directly — see §11).
+2. **Personalized suggestions** based on user interests + chat history. LLM call: "given the user's interests `{x, y, z}` and recent chat themes `{a, b}`, suggest 4-6 specific Theme ideas they'd plausibly want." Output is a list of `{title, one-sentence-pitch}`. These are NOT in the catalogue — they're generated on the fly and become user-Themes only when the user accepts.
 3. **Suggestions derived from quick-chats.** If a user spent significant time in a quick-chat about, say, vacation planning, a system suggestion appears: "Du hast viel über deine Reise gesprochen — willst du daraus ein Theme machen?"
 
-User taps a suggestion → lands in the Theme-detail-and-customize view with the suggestion's data pre-filled, can edit/expand, confirms.
+User taps a catalogue entry → it gets **copied** into the user's `themes` table (with `source = 'catalogue'` and `catalogue_id` set). The user owns the copy from that point on; subsequent edits to the catalogue entry do NOT affect already-adopted user Themes. This isolation is intentional: user progress is independent, catalogue can evolve.
+
+User taps a personalized or quick-chat suggestion → lands in the customize-and-confirm view (same UI as from-scratch wizard, pre-filled).
+
+**Auto-adoption for new users.** On signup, a small set of catalogue Themes flagged as "basics" (e.g. Smalltalk, Vorstellung, Zahlen + Zeit) is automatically copied into the user's `themes`. The user lands in the Themes hub with these already present, not an empty slate. They can delete what they don't want; they don't have to start from zero.
 
 ### 5b. From scratch
 
@@ -307,10 +311,32 @@ Critical design notes:
 - **No "test" framing.** The user isn't aware the AI is trying to introduce specific vocab. It just feels like a natural conversation in this world.
 - **Persona personas live in `persona_json` only if the Theme has one.** A Smalltalk Theme has no persona. A "talk to Carlos at the bar" Theme has Carlos's age, job, music taste, etc., and the AI roleplays as Carlos.
 
+### 8a. Vocab suggestion bar above the chat
+
+At the top of every Theme-chat, a small persistent bar shows **3-5 vocabulary items from the current level the user hasn't earned yet** (Cold or Warm state). Critically: these are shown in the **native language**, not the target language. The user reads them as a prompt — "try to say these things in Spanish" — and discovers the target-language form through use, where the chat will steer naturally toward letting them deploy it.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Probier diese Wörter:                                    │
+│  • der Spielzug    • verfehlen    • der Stoß             │
+│  • am Zug sein    • die Pause                            │
+└──────────────────────────────────────────────────────────┘
+[chat below…]
+```
+
+Selection logic for which 3-5 to show:
+- Prefer Cold (never deployed AND SRS stage low) — these need the most help.
+- Then Warm (SRS stage met, never deployed). They just need to be used once to graduate to Earned.
+- Skip Earned entirely.
+- Within those pools, prefer higher-frequency / more-central vocab first.
+
+The bar refreshes every 2-3 user turns (or when a deployment lands and changes a word's state). Tap on a vocab entry → small popover with the target-language form, so the user can peek at the form without it being shoved in their face.
+
 After each user turn:
 1. Existing transcription + correction pipeline runs.
 2. New step: `detectDeployments` runs (§7d), updates `theme_vocab` counters.
-3. AI's reply is generated with the Theme-scoped prompt above.
+3. The suggestion bar refreshes if any state changes occurred.
+4. AI's reply is generated with the Theme-scoped prompt above.
 
 When the user finishes a Theme-chat (back arrow or "Beenden"):
 1. Existing interest-extraction can still fire (since vocab insights are useful).
@@ -334,9 +360,29 @@ The current "speak / type one sentence, get a corrected version" mode lives on a
 ## 11. Schema additions
 
 ```sql
+-- System-wide catalogue. Not per-user; one row defines a Theme that
+-- any user can "adopt" (which copies it into their themes table).
+-- Edits to catalogue rows do NOT propagate to already-adopted user
+-- Themes — those are independent copies once adopted. The catalogue
+-- is curated manually, not generated.
+CREATE TABLE theme_catalogue (
+  id                     SERIAL PRIMARY KEY,
+  language               TEXT NOT NULL,   -- target language this catalogue entry is for (e.g. 'Spanish')
+  name                   TEXT NOT NULL,
+  scenario_description   TEXT NOT NULL,
+  goal_description       TEXT NOT NULL,
+  is_basic               BOOLEAN NOT NULL DEFAULT false,  -- auto-copied to new users on signup
+  default_vocab_json     TEXT,            -- optional curated vocab list for Level 1 (skips LLM generation)
+  created_at             INTEGER NOT NULL,
+  updated_at             INTEGER NOT NULL,
+  archived_at            INTEGER
+);
+CREATE INDEX idx_theme_catalogue_lang ON theme_catalogue(language, archived_at);
+
 CREATE TABLE themes (
   id                     SERIAL PRIMARY KEY,
   user_id                INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  catalogue_id           INTEGER REFERENCES theme_catalogue(id) ON DELETE SET NULL,
   name                   TEXT NOT NULL,
   scenario_description   TEXT NOT NULL,
   goal_description       TEXT NOT NULL,
@@ -347,6 +393,7 @@ CREATE TABLE themes (
   archived_at            INTEGER
 );
 CREATE INDEX idx_themes_user ON themes(user_id);
+CREATE INDEX idx_themes_catalogue ON themes(catalogue_id);
 
 CREATE TABLE theme_levels (
   id              SERIAL PRIMARY KEY,
@@ -420,13 +467,13 @@ The existing `topicSets`, `topics_json`, `currentSetId`, `nextSetId` columns are
 
 Even within v1, suggest building in this order so something is usable early:
 
-1. **Phase A — Schema + Theme CRUD.** Tables, basic UI to create a Theme (from-scratch wizard only — no catalogue / no suggestions yet). User can manually create a Theme and see it on the hub. Vocab pool generation for level 1.
-2. **Phase B — Theme-scoped chat + vocab linking.** Theme-chat works, deploys count, vocab linked from chats. Vocab review filtered to current Theme-level.
-3. **Phase C — Level unlock + progression UI.** Unlock condition implementation, progress bar, "level 2 freigeschaltet"-celebration.
-4. **Phase D — Catalogue + personalized suggestions.** The "Neues Thema"-page gets its mixed-source suggester.
+1. **Phase A — Schema + Theme CRUD + Catalogue table.** All four new tables: `theme_catalogue`, `themes`, `theme_levels`, `theme_vocab`. Catalogue rows hand-seeded for the first 8-10 entries (Smalltalk, Restaurant, Vorstellung, Zahlen + Zeit, Reise-Smalltalk, Familienfeier, …). Basic UI to create a Theme from-scratch wizard. The Themes hub renders the user's themes (empty for now or the auto-copied basics if implemented in this phase). Vocab pool generation for Level 1 (LLM call OR via `default_vocab_json` shortcut from the catalogue entry).
+2. **Phase B — Catalogue browsing + adoption + auto-basics.** "Neues Thema"-page shows the catalogue grid. Tap → row copied into user's themes. New-user signup hook auto-copies catalogue rows flagged `is_basic = true`. Personalized + quick-chat-derived suggestions deferred to Phase D.
+3. **Phase C — Theme-scoped chat + vocab linking + suggestion bar.** Theme-chat works with the scenario/persona system prompt. Vocab gets linked to theme_vocab on the right context. detectDeployments runs. Suggestion bar above the chat shows 3-5 cold/warm vocab in native language. Vocab review filtered to current Theme-level.
+4. **Phase D — Level unlock + progression UI + personalized suggestions.** Unlock condition, progress bar, "level 2 freigeschaltet"-celebration. Personalized "neues Thema"-suggestions LLM call now too.
 5. **Phase E — Quick-chat → Theme conversion.** End-of-quick-chat offer.
 
-A user on the day Phase A ships can already create a Theme from scratch and start the chat. Phase B unlocks the actual progression mechanic. Each phase is shippable independently.
+A user on the day Phase A ships can already create a Theme from scratch and start the chat. Phase B opens the catalogue and gives new users a sensible default deck. Phase C unlocks the deployment-driven progression mechanic. Each phase is shippable independently.
 
 ## 15. Out of v1 / Phase 2 ideas
 
@@ -438,12 +485,14 @@ A user on the day Phase A ships can already create a Theme from scratch and star
 
 ## 16. Open questions
 
-- **Catalogue curation:** who writes the universal Themes (Smalltalk, Restaurant, …)? Manually authored by us for v1 in German + Spanish, with the scenario/goal text crafted carefully. Maintenance burden but small (~12-15 entries per target language).
+- **Catalogue curation:** the catalogue lives in the `theme_catalogue` table, hand-authored for each target language. ~15-20 entries to start. Maintenance burden is small but non-zero. A simple admin route (`/admin/catalogue`) for editing entries would help long-term; manual SQL is fine for v1.
 - **Multiple active levels per Theme:** can a user practice Theme A Level 2 vocab while Level 3 is also unlocked but not started? Probably yes — let them pick which level to practice. Easy.
 - **What happens to vocab when a Theme is deleted?** Theme rows go, but the underlying `user_vocab` rows stay. The vocab the user learned doesn't disappear from their global pool. (`theme_vocab` cascade-deletes, `user_vocab` is independent.)
 - **Quick-chats and unknown words:** when a user taps a word in a quick-chat, that vocab gets added to `user_vocab` with no Theme tag. Good — global pool grows organically. If they later add a Theme covering similar territory, the new Theme can already link those words at generation time.
 - **Should the user see which words are "cold / warm / earned"?** In the Theme detail page, yes — at least as a brief tag on each card in the vocab review. Helps the user understand the deployment gating.
 - **What if the LLM-generated vocab pool feels wrong?** Add a "regenerate vocabulary for this level" button (Theme-detail menu). Costs ~$0.05, but worth having for the first weeks while we tune the generation prompt.
+- **"Klassische spanische Phrasen"-style Themes have a deployment-gating weakness.** If the Theme's vocab is mostly fixed idiomatic phrases ("¡Qué lástima!", "no pasa nada", "vale"), they don't naturally appear in free-flowing conversation. The deployment-gating mechanic struggles here: the user might never get to use them organically. **For v1 we accept this** — the suggestion bar at the top of the chat (§8a) gives the user a nudge, but the conversation stays generic and drift is fine. A future iteration could add an explicit "Phrasen-Drill"-mode for these special Themes that prompts the user to use a specific phrase per AI turn. Not a v1 concern; flagged as known limitation.
+- **Catalogue updates after adoption.** If we improve the scenario text on a catalogue entry, already-adopted user copies don't pick up the change. Probably fine — users own their copies — but worth thinking about whether a soft "this catalogue has been updated, refresh your copy?" hint should exist. v2 question.
 
 ## 17. What this supersedes / restructures
 
