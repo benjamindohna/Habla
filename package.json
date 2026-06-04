@@ -6,7 +6,6 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "seed": "tsx scripts/seed.ts",
     "warm": "node --env-file=.env.local --import tsx scripts/warm.ts",
     "backfill-vocab-assets": "node --env-file=.env.local --import tsx scripts/backfillVocabAssets.ts",
     "test": "tsx --test tests/*.test.ts",
