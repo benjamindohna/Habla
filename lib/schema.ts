@@ -143,7 +143,12 @@ export const userVocab = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     targetWordOriginal: text("target_word_original").notNull(),
     targetWordLower: text("target_word_lower").notNull(),
-    englishDescription: text("english_description").notNull(),
+    // english_description was the old per-sense anchor. Now superseded
+    // by word_class — the dedup + classification key is much simpler.
+    // Column is kept nullable for legacy rows; new inserts leave it null.
+    // Will be dropped in a follow-up cleanup migration once stable.
+    englishDescription: text("english_description"),
+    wordClass: text("word_class"),
     contextSentence: text("context_sentence"),
     stage: integer("stage").notNull().default(0),
     stageSentence: integer("stage_sentence").notNull().default(0),
@@ -159,6 +164,19 @@ export const userVocab = pgTable(
   },
   (t) => ({
     userLowerIdx: index("idx_user_vocab_user_lower").on(t.userId, t.targetWordLower),
+    // UNIQUE on the dedup key — the DB itself guarantees that two saves
+    // of the same word in the same word class for the same user can
+    // never produce duplicate rows, regardless of classifier drift or
+    // race conditions in the save flow. Treated as a hard invariant.
+    // NULL word_class (legacy rows pre-refactor) is allowed multiple
+    // times because Postgres treats NULLs as distinct in UNIQUE — but
+    // those rows will all get backfilled with non-null values, so the
+    // long-term state has every row participating in uniqueness.
+    userLowerClassUnique: uniqueIndex("ux_user_vocab_user_lower_class").on(
+      t.userId,
+      t.targetWordLower,
+      t.wordClass,
+    ),
     userDueIdx: index("idx_user_vocab_user_due").on(t.userId, t.nextDueAt),
     rankIdx: index("idx_user_vocab_rank").on(t.userId, t.relevanceRank),
   }),

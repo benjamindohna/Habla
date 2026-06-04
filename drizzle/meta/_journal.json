@@ -15,6 +15,20 @@
       "when": 1780563142735,
       "tag": "0001_clear_doctor_doom",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780581451489,
+      "tag": "0002_quick_slapstick",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780582458526,
+      "tag": "0003_tired_ma_gnuci",
+      "breakpoints": true
     }
   ]
 }

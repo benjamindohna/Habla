@@ -111,11 +111,9 @@ async function main() {
         targetLanguage: user.targetLanguage,
       });
       const tag = res.action.padEnd(20);
-      const desc = "description" in res ? res.description : "(merged into existing)";
-      console.log(`  ${tag} "${r.target_word_original}" → ${desc}`);
+      console.log(`  ${tag} "${r.target_word_original}" → word_class=${res.wordClass}`);
       if (res.action === "inserted") inserted++;
       else if (res.action === "merged") merged++;
-      else if (res.action === "polysemy_inserted") polysemy++;
     } catch (err) {
       failed++;
       console.warn(`  FAIL "${r.target_word_original}": ${(err as Error).message}`);

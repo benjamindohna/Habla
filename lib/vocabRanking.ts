@@ -21,7 +21,7 @@ const BULK_SORT_THRESHOLD = 15;
 interface VocabRow {
   id: number;
   target_word_original: string;
-  english_description: string;
+  word_class: string | null;
   relevance_rank: number;
 }
 
@@ -33,7 +33,7 @@ export async function rerankAfterInsert(userId: number, newRowId: number): Promi
     .select({
       id: userVocab.id,
       target_word_original: userVocab.targetWordOriginal,
-      english_description: userVocab.englishDescription,
+      word_class: userVocab.wordClass,
       relevance_rank: userVocab.relevanceRank,
     })
     .from(userVocab)
@@ -232,5 +232,11 @@ async function applyBinaryInsert(userId: number, newRowId: number, insertionRank
 }
 
 function formatItem(row: VocabRow): string {
-  return `${row.target_word_original} — ${row.english_description}`;
+  // Ranking LLM only needs the surface form + a coarse word-class hint
+  // so it can distinguish "vino" the noun from "vino" the verb when
+  // both exist. The old english_description was richer but is gone
+  // post-refactor; word_class is enough for linguistic-importance
+  // ranking. Legacy rows with null word_class fall back to a bare word.
+  const cls = row.word_class ? ` (${row.word_class})` : "";
+  return `${row.target_word_original}${cls}`;
 }

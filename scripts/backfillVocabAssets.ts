@@ -15,10 +15,9 @@ interface Row {
   id: number;
   user_id: number;
   target_word_original: string;
-  english_description: string;
+  word_class: string | null;
   context_sentence: string | null;
   native_translation: string | null;
-  native_hint: string | null;
   tts_audio: Buffer | null;
 }
 
@@ -36,20 +35,19 @@ async function backfillRow(row: Row): Promise<{ id: number; explainOk: boolean; 
 
   const tasks: Promise<void>[] = [];
 
-  if (!row.native_translation || row.native_hint === null) {
+  if (!row.native_translation) {
     tasks.push(
       (async () => {
         try {
           const res = await generateExplanation({
             target_word: row.target_word_original,
-            english_description: row.english_description,
-            context_sentence: row.context_sentence ?? "",
+            word_class: ((row.word_class ?? "noun") as never),
             targetLanguage: user.targetLanguage,
             native_language: user.nativeLanguage,
           });
           await db
             .update(userVocab)
-            .set({ nativeTranslation: res.translation, nativeHint: res.hint })
+            .set({ nativeTranslation: res.translation })
             .where(eq(userVocab.id, row.id));
         } catch (err) {
           explainOk = false;
@@ -83,20 +81,13 @@ async function main() {
       id: userVocab.id,
       user_id: userVocab.userId,
       target_word_original: userVocab.targetWordOriginal,
-      english_description: userVocab.englishDescription,
+      word_class: userVocab.wordClass,
       context_sentence: userVocab.contextSentence,
       native_translation: userVocab.nativeTranslation,
-      native_hint: userVocab.nativeHint,
       tts_audio: userVocab.ttsAudio,
     })
     .from(userVocab)
-    .where(
-      or(
-        isNull(userVocab.nativeTranslation),
-        isNull(userVocab.nativeHint),
-        isNull(userVocab.ttsAudio),
-      ),
-    )
+    .where(or(isNull(userVocab.nativeTranslation), isNull(userVocab.ttsAudio)))
     .orderBy(asc(userVocab.id));
   const rows = rowsRaw as Row[];
 

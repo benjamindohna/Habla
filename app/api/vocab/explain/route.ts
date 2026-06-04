@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { userVocab } from "@/lib/schema";
 import { and, eq } from "drizzle-orm";
 import { generateExplanation } from "@/lib/vocabExplain";
+import type { WordClass } from "@/lib/vocabClassify";
 
 /**
  * Returns the row's native-language translation + hint. Cache-aware:
@@ -33,10 +34,8 @@ export async function POST(req: NextRequest) {
     .select({
       id: userVocab.id,
       targetWordOriginal: userVocab.targetWordOriginal,
-      englishDescription: userVocab.englishDescription,
-      contextSentence: userVocab.contextSentence,
+      wordClass: userVocab.wordClass,
       nativeTranslation: userVocab.nativeTranslation,
-      nativeHint: userVocab.nativeHint,
     })
     .from(userVocab)
     .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, session.userId)))
@@ -46,28 +45,32 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Card not found" }, { status: 404 });
   }
 
-  // Cache hit: both fields populated → return directly.
-  if (row.nativeTranslation && row.nativeHint !== null) {
+  // Cache hit: native translation populated → return directly. Hint
+  // field is gone after the explain-pipeline refactor; the response
+  // shape keeps an empty hint string for frontend back-compat.
+  if (row.nativeTranslation) {
     return NextResponse.json({
       translation: row.nativeTranslation,
-      hint: row.nativeHint,
+      hint: "",
     });
   }
 
-  // Cache miss: generate, persist, return.
+  // Cache miss: generate, persist, return. If word_class is missing
+  // for a legacy row (pre-refactor), fall back to "noun" — the
+  // classifier should have backfilled it via the migration script,
+  // but never crash on a missing value.
   try {
     const result = await generateExplanation({
       target_word: row.targetWordOriginal,
-      english_description: row.englishDescription,
-      context_sentence: row.contextSentence ?? "",
+      word_class: (row.wordClass ?? "noun") as WordClass,
       targetLanguage: user.targetLanguage,
       native_language: user.nativeLanguage,
     });
     await db
       .update(userVocab)
-      .set({ nativeTranslation: result.translation, nativeHint: result.hint })
+      .set({ nativeTranslation: result.translation })
       .where(and(eq(userVocab.id, row.id), eq(userVocab.userId, session.userId)));
-    return NextResponse.json(result);
+    return NextResponse.json({ translation: result.translation, hint: "" });
   } catch (err) {
     console.error("[/api/vocab/explain]", err);
     return NextResponse.json({ error: "Explain failed" }, { status: 500 });

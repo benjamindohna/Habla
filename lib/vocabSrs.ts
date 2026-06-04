@@ -21,17 +21,22 @@ export type VocabMode = "recognition" | "sentence";
 export interface DueVocabRow {
   id: number;
   target_word_original: string;
-  english_description: string;
+  /** Deprecated: pre-refactor sense-key, kept on legacy rows. Use
+   *  word_class for new logic. Null on rows inserted after the refactor. */
+  english_description: string | null;
+  word_class: string | null;
   /** Stage for the queried MODE (aliased from stage / stage_sentence). */
   stage: number;
   last_seen: number;
-  /** Cached native-language translation + hint, populated by
+  /** Cached native-language translation, populated by
    *  generateAssetsAsync at save time or by the explain endpoint on
    *  first reveal. Sent down with the queue so flipping a card no
-   *  longer requires a second roundtrip — the client uses these
-   *  directly and only falls back to /api/vocab/explain when both
-   *  are null (e.g. brand-new card before the async job lands). */
+   *  longer requires a second roundtrip — the client uses it directly
+   *  and only falls back to /api/vocab/explain when null (brand-new
+   *  card before the async job lands). */
   native_translation: string | null;
+  /** Deprecated: hint field removed post-refactor. Stays in the type
+   *  for backwards compat with legacy rows; always null for new rows. */
   native_hint: string | null;
 }
 
@@ -69,6 +74,7 @@ export async function getDueVocabQueue(
       id: userVocab.id,
       target_word_original: userVocab.targetWordOriginal,
       english_description: userVocab.englishDescription,
+      word_class: userVocab.wordClass,
       stage: stageCol,
       last_seen: userVocab.lastSeen,
       native_translation: userVocab.nativeTranslation,
