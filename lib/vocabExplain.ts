@@ -3,6 +3,26 @@
 //   - /api/vocab/explain (cache-aware: cache hit → return; miss → generate + write back)
 //   - vocabSave async pre-generation (right after insert)
 //   - scripts/backfillVocabAssets.ts (one-shot for legacy rows)
+//
+// Philosophy: a vocab card teaches the word's MEANING SPACE within
+// the lexical entry the learner originally encountered. Concretely:
+//   - english_description acts as a SOFT anchor — it tells the LLM
+//     which lexical entry / part-of-speech the row is about (was it
+//     "vino" the noun = wine, or "vino" the verb = came?). The primary
+//     translation leads with that sense.
+//   - Polysemy WITHIN the same word class (same lexical entry, related
+//     senses) is still surfaced as secondary translations and synonyms:
+//     "banco" → bank + bench; "vela" → candle + sail.
+//   - Cross-POS HOMOGRAPHS (different word, same spelling — "vino"
+//     verb vs noun; "como" verb vs comparator; "para" verb vs
+//     preposition) are NOT mixed onto the same card. They live as
+//     separate rows already (different english_description → different
+//     vocab entry), so each card stays focused on one lexical entry.
+//
+// The sentence-mode judge is loosened in lockstep — it accepts any
+// well-known sense, so polysemy mismatches in production are fine.
+// The judge still uses english_description as the row identity but
+// no longer rejects sentences that anchor a different sense.
 
 import { chatJSON } from "./llm";
 import type { TargetLanguageSpec } from "./targetLanguage";
@@ -10,18 +30,15 @@ import type { TargetLanguageSpec } from "./targetLanguage";
 export interface ExplainArgs {
   /** Target word as shown on the card (preserves casing / form). */
   target_word: string;
-  /** The sentence the word was tapped in. Sense-disambiguates polysemous
-   *  words and provides a writing example for the hint. */
-  context_sentence: string;
-  /** English sense-key the row was saved under (e.g. "contrastive
-   *  conjunction" for "que" in "mientras que"). The judge uses this as
-   *  its ground truth, so the explanation has to translate THIS sense
-   *  to stay consistent — otherwise the reveal panel shows an answer
-   *  the judge would reject. Earlier versions deliberately decoupled
-   *  this; that bought hedge-bet correctness against mis-aimed
-   *  descriptions but at the cost of judge/explain divergence, which
-   *  is more confusing for the learner than a consistently wrong row. */
+  /** English sense-key the row was saved under. Used as a soft anchor:
+   *  it tells the prompt which lexical entry / part-of-speech the row
+   *  represents, so the translation leads with that sense and skips
+   *  cross-POS homographs of the same spelling. */
   english_description: string;
+  /** The sentence the word was tapped in. Soft cue for the hint's
+   *  usage example. The translation itself is meant to cover the
+   *  word's meaning space within the anchored lexical entry. */
+  context_sentence: string;
   /** The learner's target-language spec — threaded from the session user. */
   targetLanguage: TargetLanguageSpec;
   /** e.g. "German". */
@@ -29,12 +46,11 @@ export interface ExplainArgs {
 }
 
 export interface Explanation {
-  /** Vocab-card-style native-language translation that mirrors the
-   *  target word's structure (article + noun, full multi-word phrase
-   *  for compound tenses, etc.). */
+  /** Compact native-language string covering the primary translation,
+   *  common synonyms, and other related senses within the same lexical
+   *  entry. Cross-POS homographs are deliberately excluded. */
   translation: string;
-  /** Short native-language example or memory aid disambiguating
-   *  THIS sense from other senses. ≤15 words. */
+  /** Short native-language usage example or memory aid. ≤15 words. */
   hint: string;
 }
 
@@ -45,46 +61,83 @@ export interface Explanation {
 export async function generateExplanation(args: ExplainArgs): Promise<Explanation> {
   const prompt = `You are a vocabulary tutor. The learner is studying ${args.targetLanguage.language}; their native language is ${args.native_language}.
 
-The learner couldn't recall this word. Give a clear, structurally-faithful answer plus a short memory aid.
+Produce a vocabulary card answer for the target word. The answer is shown when the learner reveals the card — your job is to teach the word's MEANING SPACE within the specific lexical entry the learner encountered.
 
-CRITICAL — anchor on the TESTED SENSE. Below you will receive an English sense-key. Your translation must render THAT specific sense in ${args.native_language}, even when the word has other common meanings the learner might expect. Example: if the word is "que" and the tested sense is "contrastive conjunction (whereas / while)", translate as "wohingegen / während" — never "was / dass". The judge that evaluates the learner uses this same sense-key as ground truth, so a translation that drifts to a different sense will tell the learner an answer the judge will reject.
+═════ ANCHORING ═════
 
-The TRANSLATION must be the natural ${args.native_language} equivalent that mirrors the STRUCTURE of the target word — preserve every semantic component the target carries:
-- Single noun → article (with correct gender) + noun.
-- Single conjugated verb → infinitive form, OR include the subject pronoun if the conjugation is distinctive (1st/2nd person).
-- Multi-word verbal phrase (compound tense, modal periphrasis, clitic + verb) → full ${args.native_language} equivalent that preserves tense, aspect, and any clitic objects. Do NOT collapse to a single word.
-- Idiom / fixed expression → idiomatic ${args.native_language} equivalent (or close paraphrase if no exact idiom exists).
-- Adjective / adverb / function word → plain natural form.
+Below you receive an English sense-key. This identifies WHICH LEXICAL ENTRY the row is about — crucial when the spelling is shared across different words (e.g. Spanish "vino" can be the noun "wine" OR the verb "came" — totally unrelated words that happen to be spelled the same). Lead with the sense the key indicates; if the same spelling exists as a different part of speech / different etymological word, DO NOT mention that other word on this card. It lives on its own row.
 
-CONTEXT-LEAK GUARD — translate the WORD'S CORE MEANING, not the context's flavour. The sentence is given for sense disambiguation and for the hint's example, never to colour the translation with topical context. Do not let topical nouns from the sentence ("birds", "ocean", "game", "teammates") leak into your translation. Litmus test: imagine the same word used in a different context tomorrow — would your translation still apply? If no, you've over-specified.
+Inside the anchored lexical entry, however, fully cover polysemy: related senses of the SAME word in the SAME word class should all appear (e.g. "banco" the noun → bank AND bench; "vela" the noun → candle AND sail; "correr" the verb → run physically AND run/operate something).
 
-Worked examples (target Spanish, native German — illustrative, the same logic applies to any pair):
-- "casa"                → translation: "das Haus", hint: "Ein Gebäude, in dem man wohnt."
-- "comer"               → translation: "essen", hint: "Mahlzeiten zu sich nehmen."
-- "comió"               → translation: "(er/sie) aß / hat gegessen", hint: "Vergangenheit von essen."
-- "banco" in "Voy al banco a sacar dinero." → translation: "die Bank (Geldinstitut)", hint: "Wo man Geld einzahlt oder abhebt."
-- "banco" in "Me senté en el banco del parque." → translation: "die Sitzbank", hint: "Eine lange Bank, auf der man im Park sitzt."
-- "te haya impresionado" → translation: "(es) hat dich beeindruckt (Konjunktiv Perfekt)", hint: "Form nach „que" oder „ojalá", drückt Unsicherheit aus."
-- "darse cuenta"        → translation: "merken / bemerken (reflexiv)", hint: "Etwas plötzlich verstehen oder feststellen."
-- "echar de menos"      → translation: "vermissen", hint: "Jemanden oder etwas Abwesendes vermissen."
-- "voy a hacer"         → translation: "ich werde machen / ich gehe machen (nahe Zukunft)", hint: "Ankündigung einer baldigen Handlung."
+═════ TRANSLATION FORMAT ═════
 
-Anti-examples — these are CONTEXT-LEAK failures. The bad version pulls vocabulary from the surrounding clause into the translation; the good version stays at the word's lexical level:
-- "canto" in "el canto de los pájaros"     → ❌ "der Gesang der Vögel"      ✅ "der Gesang"
-- "olas" in "las olas chocaban con la playa" → ❌ "die Meereswellen"          ✅ "die Wellen"
-- "buceo" in "fuimos a hacer buceo en Tailandia" → ❌ "das Sporttauchen"     ✅ "das Tauchen"
-- "encontrar" in "no podía encontrar a sus compañeros" → ❌ "Mitspieler finden" ✅ "finden"
-- "estilo" in "su estilo de juego es ofensivo" → ❌ "Spielstil" ✅ "der Stil"
-- "toque" in "un toque sutil del defensa" → ❌ "geschickter Spielzug" ✅ "die Berührung"
+THE TRANSLATION must cover, within the anchored lexical entry only:
+- The PRIMARY ${args.native_language} translation matching the sense-key, in the natural form that mirrors the target's structure (article + noun for nouns, infinitive for verbs, full phrase for multi-word verb forms, idiomatic equivalent for fixed expressions).
+- Common SYNONYMS in ${args.native_language} (1–3, only when they meaningfully exist — don't pad).
+- Other distinct SENSES of the same lexical entry if it's polysemous within its word class. Tag each with a 1–3 word disambiguator in parentheses.
+
+Format the translation as a compact readable string. Pattern:
+  <primary translation>; Synonyme: <syn1>, <syn2>; auch: <other sense> (<short tag>)
+Drop any section that doesn't apply. Keep it tight — this is shown on a flashcard, not a dictionary entry. Use ${args.native_language} for the section labels (the example uses German; adapt to the learner's native language).
+
+THE HINT is one short ${args.native_language} sentence (≤15 words) giving a typical usage example or memory aid. Use the anchored sense. Ends with a period.
+
+═════ WORKED EXAMPLES (Spanish target, German native — illustrative; same logic applies to any language pair) ═════
+
+Polysemy within the same word class — surface both:
+- "banco" (sense: "financial institution / bank")
+    → translation: "die Bank (Geldinstitut); auch: die Sitzbank (Möbel)"
+       hint: "Zur Bank gehen, um Geld abzuheben."
+- "vela" (sense: "candle for lighting")
+    → translation: "die Kerze; auch: das Segel (am Boot)"
+       hint: "Eine Kerze anzünden."
+
+Cross-POS homographs — do NOT mention the other word:
+- "vino" (sense: "wine / alcoholic drink from grapes")
+    → translation: "der Wein"
+       hint: "Ein Glas Rotwein zum Essen."
+   (The verb "vino" = "came" is a different lexical entry — not mentioned here.)
+- "vino" (sense: "3rd-person past of venir / came")
+    → translation: "(er/sie) kam (Vergangenheit von venir)"
+       hint: "Vergangenheitsform von venir: Wer kam wann?"
+   (The noun "vino" = "wine" is a different lexical entry — not mentioned here.)
+- "como" (sense: "1st-person present of comer / I eat")
+    → translation: "(ich) esse (1. Person Präsens von comer)"
+       hint: "Heute esse ich Pasta."
+- "como" (sense: "as / like — comparison conjunction")
+    → translation: "wie, als (Vergleich); Synonyme: gleich wie"
+       hint: "Sie ist groß wie ihr Vater."
+- "para" (sense: "for / in order to — preposition")
+    → translation: "für, um zu (Zweck)"
+       hint: "Ein Geschenk für meine Mutter."
+
+Standard cases — no homograph conflict:
+- "casa" (sense: "house / dwelling")
+    → translation: "das Haus; Synonyme: das Heim, das Zuhause"
+       hint: "Ein Gebäude, in dem man wohnt."
+- "comer" (sense: "to eat / consume food")
+    → translation: "essen; Synonyme: speisen"
+       hint: "Mahlzeiten zu sich nehmen."
+- "comió" (sense: "ate, 3rd person past")
+    → translation: "(er/sie) aß / hat gegessen (Vergangenheit von essen)"
+       hint: "Vergangenheitsform: Was hat er/sie gegessen?"
+- "echar de menos" (sense: "to miss someone")
+    → translation: "vermissen; Synonyme: sich nach jdm. sehnen"
+       hint: "Jemanden vermissen, der weit weg ist."
+- "darse cuenta" (sense: "to realize / notice")
+    → translation: "merken, bemerken; Synonyme: realisieren, feststellen"
+       hint: "Etwas plötzlich verstehen."
+
+═════ NOW EVALUATE ═════
 
 Word: "${args.target_word}"
-Tested sense (English sense-key — your translation must render THIS sense): "${args.english_description}"
-Context where the word appears (use for the hint example; for sense, prefer the sense-key above): "${args.context_sentence}"
+Sense-key (anchors which lexical entry — translate this entry's meaning space, do not mention cross-POS homographs of the same spelling): "${args.english_description}"
+Context where the word was first seen (soft cue for the hint; don't let it narrow the translation beyond the lexical entry): "${args.context_sentence}"
 
 Return ONLY valid JSON:
 {
-  "translation": "<full ${args.native_language} translation that mirrors the target's structure>",
-  "hint": "<short ${args.native_language} example or memory aid that disambiguates THIS sense from other senses of the word, max 15 words, ends with a period>"
+  "translation": "<compact ${args.native_language} translation covering the anchored lexical entry's primary meaning + synonyms + related senses>",
+  "hint": "<one short ${args.native_language} usage example or memory aid for the anchored sense, max 15 words, ends with a period>"
 }`;
 
   const result = await chatJSON<{ translation?: string; hint?: string }>({

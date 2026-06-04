@@ -198,6 +198,8 @@ Sometimes the bare translation isn't enough. The user wants to dig deeper withou
 
 ## 6. Onboarding placement test + tiered seed-vocab import
 
+> **⚠️ Partially superseded.** The placement-test design here was replaced by a different approach: a disguised conversation-mode-based level assessment. See **`ONBOARDING_PLAN.md`** for the current plan. The remaining open question from this section — *should we auto-import a slice of seed-vocab into new users' decks at all, regardless of how their level was determined?* — is preserved below as a future decision, decoupled from placement.
+
 **What it is**
 
 When a new user signs up, run a short calibration test (~5-10 cards spanning frequency ranks 50 / 200 / 500 / 1000 / 2000) to estimate their level. Score determines what slice of a pre-computed seed-vocab list gets imported into their `user_vocab`:

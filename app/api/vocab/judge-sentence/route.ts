@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
 import { db } from "@/lib/db";
 import { userVocab } from "@/lib/schema";
@@ -17,6 +18,7 @@ import { judgeVocabSentence, explainSentenceMistake } from "@/lib/vocabSentenceJ
  * judge, so retries don't cascade-halve the stage.
  */
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/vocab/judge-sentence", async () => {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -56,7 +58,6 @@ export async function POST(req: NextRequest) {
   try {
     const verdict = await judgeVocabSentence({
       target_word: row.targetWordOriginal,
-      tested_description: row.englishDescription,
       user_sentence: trimmedSentence,
       targetLanguage: user.targetLanguage,
       native_language: user.nativeLanguage,
@@ -67,7 +68,6 @@ export async function POST(req: NextRequest) {
       try {
         mistakeHint = await explainSentenceMistake({
           target_word: row.targetWordOriginal,
-          tested_description: row.englishDescription,
           native_translation: row.nativeTranslation ?? "",
           user_sentence: trimmedSentence,
           targetLanguage: user.targetLanguage,
@@ -87,4 +87,5 @@ export async function POST(req: NextRequest) {
     console.error("[/api/vocab/judge-sentence]", err);
     return NextResponse.json({ error: "Judge failed" }, { status: 500 });
   }
+  });
 }

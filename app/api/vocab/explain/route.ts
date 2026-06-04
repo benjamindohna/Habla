@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
 import { db } from "@/lib/db";
 import { userVocab } from "@/lib/schema";
@@ -15,6 +16,7 @@ import { generateExplanation } from "@/lib/vocabExplain";
  * cached.
  */
 export async function POST(req: NextRequest) {
+  return withRouteUsage("/api/vocab/explain", async () => {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -70,4 +72,5 @@ export async function POST(req: NextRequest) {
     console.error("[/api/vocab/explain]", err);
     return NextResponse.json({ error: "Explain failed" }, { status: 500 });
   }
+  });
 }
