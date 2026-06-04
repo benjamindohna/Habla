@@ -20,6 +20,14 @@
  * corner — click to hear the target word pronounced. Audio blob is
  * cached per card id within this component so re-clicks are instant.
  * Auto-stops on card change.
+ *
+ * TTS for the whole visible window (up to 5 cards) is prefetched in the
+ * background as the window shifts, so by the time a card reaches the
+ * front its audio is already in the in-memory cache and playback is
+ * instant. /api/vocab/tts is itself cache-aware (DB hit → return blob;
+ * miss → generate + persist + return), so a prefetch both warms this
+ * component's cache and triggers server-side generation for any card
+ * that has never been voiced.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -91,8 +99,40 @@ export default function VocabCardStack({
   // refetch. Invalidated implicitly when the user navigates away
   // (component unmount) — fresh queue load on remount starts cold.
   const blobCacheRef = useRef<Map<number, Blob>>(new Map());
+  // In-flight fetches keyed by card id, so a prefetch and a click that
+  // race on the same card share one request instead of firing two.
+  const inflightRef = useRef<Map<number, Promise<Blob | null>>>(new Map());
 
   const frontCardId = isExiting ? cards[1]?.id : cards[0]?.id;
+
+  // Fetch (or reuse) the TTS blob for a card id. Resolves null on
+  // failure. Dedupes via blobCacheRef (done) and inflightRef (pending).
+  async function fetchBlob(id: number): Promise<Blob | null> {
+    const cached = blobCacheRef.current.get(id);
+    if (cached) return cached;
+    const pending = inflightRef.current.get(id);
+    if (pending) return pending;
+
+    const p = (async (): Promise<Blob | null> => {
+      try {
+        const res = await fetch("/api/vocab/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rowId: id }),
+        });
+        if (!res.ok) throw new Error("TTS failed");
+        const blob = await res.blob();
+        blobCacheRef.current.set(id, blob);
+        return blob;
+      } catch {
+        return null;
+      } finally {
+        inflightRef.current.delete(id);
+      }
+    })();
+    inflightRef.current.set(id, p);
+    return p;
+  }
 
   // Stop any in-flight playback when the front card changes (after a
   // commit + exit, the next card slides in — we don't want the previous
@@ -115,6 +155,18 @@ export default function VocabCardStack({
     };
   }, []);
 
+  // Prefetch TTS for every card in the visible window. Runs whenever the
+  // window's id set changes (a card committed + the stack shifted), so
+  // the next cards' audio is warm before they reach the front. fetchBlob
+  // is a no-op for ids already cached or in flight.
+  const visibleIdsKey = visible.map((c) => c.id).join(",");
+  useEffect(() => {
+    for (const card of visible) {
+      void fetchBlob(card.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleIdsKey]);
+
   async function handleSpeak() {
     if (!frontCardId) return;
     if (ttsLoading) return;
@@ -127,23 +179,15 @@ export default function VocabCardStack({
       return;
     }
 
+    // Warm from the prefetch cache when possible; otherwise fetch now
+    // (sharing any in-flight prefetch for this id) and show the spinner.
     let blob = blobCacheRef.current.get(frontCardId);
     if (!blob) {
       setTtsLoading(true);
-      try {
-        const res = await fetch("/api/vocab/tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rowId: frontCardId }),
-        });
-        if (!res.ok) throw new Error("TTS failed");
-        blob = await res.blob();
-        blobCacheRef.current.set(frontCardId, blob);
-      } catch {
-        setTtsLoading(false);
-        return;
-      }
+      const fetched = await fetchBlob(frontCardId);
       setTtsLoading(false);
+      if (!fetched) return;
+      blob = fetched;
     }
 
     const url = URL.createObjectURL(blob);
