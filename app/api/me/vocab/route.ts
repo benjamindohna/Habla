@@ -21,8 +21,8 @@ import { and, asc, eq } from "drizzle-orm";
  * for the playground save-test view.
  */
 export async function POST(req: NextRequest) {
-  return withRouteUsage("/api/me/vocab", async () => {
   const session = await getSession();
+  return withRouteUsage("/api/me/vocab", session?.userId ?? null, async () => {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const user = await getUserById(session.userId);

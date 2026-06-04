@@ -16,8 +16,8 @@ import { generateExplanation } from "@/lib/vocabExplain";
  * cached.
  */
 export async function POST(req: NextRequest) {
-  return withRouteUsage("/api/vocab/explain", async () => {
   const session = await getSession();
+  return withRouteUsage("/api/vocab/explain", session?.userId ?? null, async () => {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const user = await getUserById(session.userId);

@@ -13,8 +13,8 @@ const MAX_TAGS = 12;
 const RECENT_TAGS = 5;
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  return withRouteUsage("/api/conversations/[id]/extract", async () => {
   const session = await getSession();
+  return withRouteUsage("/api/conversations/[id]/extract", session?.userId ?? null, async () => {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const user = await getUserById(session.userId);

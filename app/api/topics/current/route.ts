@@ -4,8 +4,8 @@ import { ensureUserTopicSets, getCurrentSet } from "@/lib/topicSets";
 import { withRouteUsage } from "@/lib/usageContext";
 
 export async function GET() {
-  return withRouteUsage("/api/topics/current", async () => {
-    const session = await getSession();
+  const session = await getSession();
+  return withRouteUsage("/api/topics/current", session?.userId ?? null, async () => {
     if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
     // Defensive lazy fallback: if the user has no current set yet (e.g., warm

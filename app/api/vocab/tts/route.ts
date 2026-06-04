@@ -13,8 +13,8 @@ import { generateTts } from "@/lib/vocabTts";
  * persist on the row, return.
  */
 export async function POST(req: NextRequest) {
-  return withRouteUsage("/api/vocab/tts", async () => {
   const session = await getSession();
+  return withRouteUsage("/api/vocab/tts", session?.userId ?? null, async () => {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });

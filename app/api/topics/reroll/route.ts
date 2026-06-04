@@ -9,8 +9,8 @@ import {
 import { withRouteUsage } from "@/lib/usageContext";
 
 export async function POST() {
-  return withRouteUsage("/api/topics/reroll", async () => {
   const session = await getSession();
+  return withRouteUsage("/api/topics/reroll", session?.userId ?? null, async () => {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   // Happy path: next is already populated → instant rotation.

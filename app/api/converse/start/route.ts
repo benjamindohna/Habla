@@ -25,8 +25,8 @@ import {
  * In both cases the AI opener becomes the conversation's first message.
  */
 export async function POST(req: NextRequest) {
-  return withRouteUsage("/api/converse/start", async () => {
   const session = await getSession();
+  return withRouteUsage("/api/converse/start", session?.userId ?? null, async () => {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const user = await getUserById(session.userId);

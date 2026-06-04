@@ -18,8 +18,8 @@ import { judgeVocabSentence, explainSentenceMistake } from "@/lib/vocabSentenceJ
  * judge, so retries don't cascade-halve the stage.
  */
 export async function POST(req: NextRequest) {
-  return withRouteUsage("/api/vocab/judge-sentence", async () => {
   const session = await getSession();
+  return withRouteUsage("/api/vocab/judge-sentence", session?.userId ?? null, async () => {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const user = await getUserById(session.userId);

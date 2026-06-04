@@ -13,6 +13,12 @@
 import { chatJSON, chatText, type ChatTask } from "./llm";
 import { describeTargetLanguage, type TargetLanguageSpec } from "./targetLanguage";
 import { describeLevelForPrompt } from "./levels";
+import { WORD_REGEX } from "./wordRegex";
+
+// Re-exported for backwards compatibility — new callers should import
+// directly from "./wordRegex" so they don't pull the rest of this
+// server-only module into a client bundle.
+export { WORD_REGEX };
 
 // ── Shared: Call A — text only ───────────────────────────────────────────
 
@@ -59,7 +65,7 @@ Return ONLY the message text in ${targetName}. No JSON, no quotes, no preamble, 
  * so a wordIndex computed in the browser refers to the same occurrence
  * the server marks in the prompt.
  */
-export const WORD_REGEX = /[\p{L}][\p{L}\p{M}'-]*/gu;
+// WORD_REGEX is defined in lib/wordRegex.ts and re-exported above.
 
 /**
  * Wrap the wordIndex-th word match in the sentence with markers. Used to

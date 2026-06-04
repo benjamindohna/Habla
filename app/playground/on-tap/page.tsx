@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { WORD_REGEX } from "@/lib/aiBubblePipeline";
+import { WORD_REGEX } from "@/lib/wordRegex";
 
 // ── Tokenisation (mirrors WORD_REGEX in lib/aiBubblePipeline.ts) ──────────
 

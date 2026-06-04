@@ -82,9 +82,9 @@ Worked example (illustrative — Spanish target, German native; pattern applies 
 }
 
 export async function POST(req: NextRequest) {
-  return withRouteUsage("/api/explain", async () => {
+  const session = await getSession();
+  return withRouteUsage("/api/explain", session?.userId ?? null, async () => {
   try {
-    const session = await getSession();
     if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     const user = await getUserById(session.userId);
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });

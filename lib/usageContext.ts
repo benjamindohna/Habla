@@ -1,6 +1,6 @@
 // Request-scoped context for the LLM-usage logger. Set at the top of a
-// route handler via withUsageContext({ userId, route }, fn); the logger
-// in lib/llm.ts reads from it via getUsageContext() and tags each
+// route handler via withRouteUsage(route, userId, fn); the logger in
+// lib/llm.ts reads from it via getUsageContext() and tags each
 // llm_usage row accordingly.
 //
 // Why AsyncLocalStorage and not "pass userId through every chat call":
@@ -11,6 +11,12 @@
 // In Node runtime (which is where every LLM-calling route runs), ALS
 // propagates across await boundaries cleanly. Edge runtime would NOT
 // work — but our LLM-using routes are all Node.
+//
+// IMPORTANT: this file deliberately does NOT import lib/auth (which
+// uses next/headers). Doing so triggers Next.js' production build to
+// trace the dependency into contexts where next/headers isn't allowed,
+// breaking the build. Each route calls getSession itself and passes
+// the userId to withRouteUsage explicitly.
 
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -33,22 +39,15 @@ export function getUsageContext(): UsageContext | null {
 }
 
 /**
- * Convenience for API routes: looks up the session and runs the handler
- * inside a usage context tagged with the resolved userId and the given
- * route path. Routes that don't require auth can pass `requireAuth: false`
- * and handle the null-session case themselves; the wrapper still tags
- * the context so the usage row gets the route name. Anything thrown
- * inside `fn` propagates up unchanged.
+ * Convenience for API routes: tag the usage context with a route name
+ * and the caller's userId, then run the handler inside that context.
+ * The userId is the caller's responsibility (a quick `await getSession()`
+ * before the wrapper; pass `session?.userId ?? null`).
  */
-export async function withRouteUsage<T>(
+export function withRouteUsage<T>(
   route: string,
+  userId: number | null,
   fn: () => Promise<T>,
 ): Promise<T> {
-  // Lazy import to avoid pulling auth machinery into non-API contexts.
-  const { getSession } = await import("./auth");
-  const session = await getSession();
-  return withUsageContext(
-    { userId: session?.userId ?? null, route },
-    fn,
-  );
+  return withUsageContext({ userId, route }, fn);
 }

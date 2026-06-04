@@ -7,7 +7,7 @@ import {
   STAGE_INTERVALS_SECONDS,
   formatStageInterval,
   projectNextStage,
-} from "@/lib/vocab";
+} from "@/lib/vocabSrsConstants";
 
 type Stage = "loading" | "ready" | "revealed" | "exiting" | "empty" | "error";
 

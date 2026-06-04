@@ -1,8 +1,38 @@
 import OpenAI from "openai";
-import { db } from "./db";
-import { llmUsage } from "./schema";
 import { getUsageContext } from "./usageContext";
 import { estimateCostUsd } from "./llmPricing";
+
+// db + schema are dynamically imported inside the logging functions —
+// statically importing them here makes Next.js bundle lib/db.ts into
+// every client component that transitively reaches lib/llm.ts (e.g.
+// via lib/vocab.ts → page.tsx). lib/db.ts pulls `postgres` which uses
+// Node-only modules ('fs', 'perf_hooks') and breaks the client build.
+// Dynamic imports keep them server-only.
+
+async function persistUsageRow(row: {
+  userId: number | null;
+  label: string;
+  model: string;
+  kind: "chat" | "transcription" | "tts";
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  reasoningTokens?: number | null;
+  inputChars?: number | null;
+  inputBytes?: number | null;
+  outputBytes?: number | null;
+  costUsd: string | null;
+  route?: string | null;
+}): Promise<void> {
+  try {
+    const [{ db }, { llmUsage }] = await Promise.all([
+      import("./db"),
+      import("./schema"),
+    ]);
+    await db.insert(llmUsage).values(row);
+  } catch (err) {
+    console.warn(`[llm-usage] insert failed for ${row.label}:`, (err as Error).message);
+  }
+}
 
 /**
  * Single source of truth for which model handles which task. Routes pick
@@ -157,22 +187,17 @@ function logUsage(label: string, model: string, usage: Usage | undefined): void 
     promptTokens: promptTokens ?? undefined,
     completionTokens: completionTokens ?? undefined,
   });
-  void db
-    .insert(llmUsage)
-    .values({
-      userId: ctx?.userId ?? null,
-      label,
-      model,
-      kind: "chat",
-      promptTokens,
-      completionTokens,
-      reasoningTokens: reasoning ?? null,
-      costUsd,
-      route: ctx?.route ?? null,
-    })
-    .catch((err) => {
-      console.warn(`[llm-usage] insert failed for ${label}:`, (err as Error).message);
-    });
+  void persistUsageRow({
+    userId: ctx?.userId ?? null,
+    label,
+    model,
+    kind: "chat",
+    promptTokens,
+    completionTokens,
+    reasoningTokens: reasoning ?? null,
+    costUsd,
+    route: ctx?.route ?? null,
+  });
 }
 
 /**
@@ -212,22 +237,17 @@ export function logAudioUsage(
     inputBytes: signals.inputBytes,
     outputBytes: signals.outputBytes,
   });
-  void db
-    .insert(llmUsage)
-    .values({
-      userId: ctx?.userId ?? null,
-      label,
-      model,
-      kind,
-      inputChars: signals.inputChars ?? null,
-      inputBytes: signals.inputBytes ?? null,
-      outputBytes: signals.outputBytes ?? null,
-      costUsd,
-      route: ctx?.route ?? null,
-    })
-    .catch((err) => {
-      console.warn(`[llm-usage] insert failed for ${label}:`, (err as Error).message);
-    });
+  void persistUsageRow({
+    userId: ctx?.userId ?? null,
+    label,
+    model,
+    kind,
+    inputChars: signals.inputChars ?? null,
+    inputBytes: signals.inputBytes ?? null,
+    outputBytes: signals.outputBytes ?? null,
+    costUsd,
+    route: ctx?.route ?? null,
+  });
 }
 
 /**

@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { WORD_REGEX } from "@/lib/aiBubblePipeline";
+import { WORD_REGEX } from "@/lib/wordRegex";
 
 // ── Tokenisation ─────────────────────────────────────────────────────────
 
