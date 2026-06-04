@@ -8,6 +8,12 @@
 > style conversation mode reusing the correction stack). Specific
 > phasing decisions and prompt iterations below may no longer match
 > current code.
+>
+> **Update 2026-06-04:** Phases 3 + 4 (the 4-3-2 LLM-generated Topic-Grid
+> as the main chat-opener mechanism) are being superseded by the new
+> Themes architecture. See `THEMES_PLAN.md`. The Topic-Grid is removed
+> in Themes v1; quick-chat mode preserves the empty-chat / record-first
+> entry point as a secondary surface.
 
 Branch: `segments3-conversation`
 

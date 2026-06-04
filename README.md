@@ -135,8 +135,9 @@ every 24 hours.
 - Versioned migrations in `lib/migrations/`. Runner auto-applies on
   first DB access per process. Currently at migration 0008.
 - Auth: bcrypt password hashes, cookie-based sessions, JWT signed with
-  `SESSION_SECRET`. See `lib/auth.ts`. Sign-up UI not yet built —
-  users added via `scripts/seed.ts`.
+  `SESSION_SECRET`. See `lib/auth.ts`. Sign-up UI not yet built — new
+  user accounts are inserted manually (one-off scripts or `db:studio`)
+  until a sign-up flow exists.
 - Migrations history:
   - 0001 baseline
   - 0002 vocab v2 (English-description-anchored)
@@ -238,9 +239,10 @@ lib/                              Server-side logic
 └── migrations/                   Versioned SQL files (0001 ... 0008)
 
 scripts/                          One-shot maintenance scripts
-├── seed.ts                       Insert bootstrap user accounts
 ├── warm.ts                       Pre-generate topic sets per user
-└── backfillVocabAssets.ts        Generate missing translation/hint/TTS
+├── backfillVocabAssets.ts        Generate missing translation/hint/TTS
+├── reExplainAll.ts               Regenerate native_translation + hint for all rows
+└── regenerateAllVocab.ts         Wipe + replay vocab rows (resets SRS)
 
 types/                            Shared TypeScript types
 ├── correction.ts                 Pair, CorrectionResult
@@ -372,30 +374,25 @@ cp .env.local.example .env.local
 # edit and set OPENAI_API_KEY=sk-...
 # also set SESSION_SECRET=<long random string> for auth
 
-# 3. Seed an admin user
-npm run seed
-
-# 4. Optional: pre-warm topic sets so the home grid is instant
+# 3. Optional: pre-warm topic sets so the home grid is instant
 npm run warm
 
-# 5. Dev server
+# 4. Dev server
 npm run dev
 # → http://localhost:3000
 
-# 6. Tests
+# 5. Tests
 npm test
 
-# 7. Backfill vocab assets (one-shot, only needed after migration 0006
+# 6. Backfill vocab assets (one-shot, only needed after migration 0006
 #    or for legacy rows missing native_translation / native_hint / tts_audio)
 npm run backfill-vocab-assets
 ```
 
-Default seed user: `admin@habla.app` / `admin123` (level 50, German native).
-See `scripts/seed.ts` to add more users — there's no signup UI yet.
-
-DB lives at `data/habla.db`. Migrations auto-apply on first DB access in
-a fresh process. To rebuild from scratch: stop dev server, `rm data/habla.db`,
-restart, re-run `npm run seed`.
+There is no bootstrap seed script — user accounts are inserted manually
+via `db:studio` or one-off scripts (no sign-up UI yet). Real accounts
+live in the DB; previously a `scripts/seed.ts` bulk-upserted test users,
+which was removed because it would overwrite real user state on re-run.
 
 ---
 
@@ -407,6 +404,8 @@ The repo has a fair number of planning docs. Quick map:
 |---|---|
 | `README.md` (this file) | First read — current state of the app |
 | `LAUNCH_PLAN.md` | Next sprint — bringing up remote test users (Spanish + Italian) with Supabase migration. Time-bound 3-4 day plan with explicit decision points. |
+| `ONBOARDING_PLAN.md` | Disguised level-assessment via conversation-mode first chat (replaces the card-drill placement test in `FEATURE_IDEAS §6`). Outputs `users.level` integer 0-100; no auto-vocab-import in v1. |
+| `THEMES_PLAN.md` | Goal-oriented persistent learning paths ("Themes") with chat-deployment-gated vocab progression. Replaces today's 4-3-2 Topic-Grid as the main app surface; quick-chat survives as secondary mode. Big architecture shift. |
 | `ROADMAP.md` | Big-picture future. Phase 1 dashboard, Phase 2 conversations redesign, Phase 4 Exploration Map (gamified language journey), Phase 5 Rigid Mode (forced reproduction drill). Items here are committed build plans, not loose ideas. |
 | `BACKLOG.md` | Items deferred during the current branch — multi-word collocation grouping bug, per-language prompt cues, comparator robustness for garbage descriptions, etc. |
 | `FEATURE_IDEAS.md` | Brainstorm phase — auto-extract unknown words from corrections, per-word breakdowns, live grammar tutor sidebar, AI Q&A sidebar, "more info" word popover, onboarding placement test + tiered seed-vocab. Not yet committed to a build plan. |
@@ -425,8 +424,8 @@ Things that aren't documented elsewhere as TODOs but are real:
   for the Italian path.
 - **Single-tenant practical**: SQLite local; no remote deployment yet.
   LAUNCH_PLAN proposes Supabase + Vercel.
-- **No sign-up UI**: users created via `scripts/seed.ts` only. LAUNCH_PLAN
-  adds a sign-up form.
+- **No sign-up UI**: new accounts have to be inserted manually (one-off
+  script or `db:studio`). LAUNCH_PLAN adds a sign-up form.
 - **No audio consent flow**: we record without explicit consent dialog. OK
   for current single-user dev; not OK for remote test users. LAUNCH_PLAN
   adds the consent modal.
