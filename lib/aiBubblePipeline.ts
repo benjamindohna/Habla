@@ -135,7 +135,12 @@ TASK 1 — DECIDE THE SEGMENT (target-language side)
 Decide whether the tapped word stands ALONE or belongs to a multi-word unit. Group it with related words when:
 - The word is an article ("el", "la", "los", "las", "un", "una", "unos", "unas") and a noun follows → segment = article + noun ("el libro").
 - The word is part of a COMPOUND TENSE: haber + past participle (he visto, había dicho, haya impresionado), estar + gerund (está hablando), ir a + infinitive (voy a hacer), modal periphrases (tener que ir, hay que hacerlo). Include any clitic object pronouns attached to the verbal complex (me, te, lo, la, le, nos, os, los, las, les, se). → segment = the whole construction.
-- The word is part of an IDIOM or fixed expression (tener ganas, darse cuenta, echar de menos, por ejemplo, en cambio, sin embargo). → segment = the whole expression.
+- The word is part of a LIGHT-VERB IDIOM where the verb is semantically incomplete without a fixed noun argument (llamar la atención, tener miedo, tener ganas, tener hambre, tener sed, tener sueño, tener razón, tener suerte, tener prisa, tener cuidado, hacer caso, hacer falta, dar igual, dar pena, dar miedo, dar asco, tomar el pelo, prestar atención, poner atención, perder la cabeza, echar de menos, darse cuenta). The segment INCLUDES the fixed noun, even when the verb is conjugated and/or in a compound tense and/or carries a clitic. Examples:
+  · tapped word in "no he tenido miedo" → segment = "he tenido miedo"
+  · tapped word in "te haya llamado la atención" → segment = "te haya llamado la atención"
+  · tapped word in "no le hizo caso" → segment = "le hizo caso"
+  This rule TRUMPS the compound-tense rule above — don't stop at the verbal complex when a fixed noun follows that completes the idiom's meaning.
+- The word is part of an IDIOM or fixed expression that doesn't fit the light-verb pattern (por ejemplo, en cambio, sin embargo, a pesar de, al lado de). → segment = the whole expression.
 - The word is part of a MULTI-WORD NAMED ENTITY (Estados Unidos, Real Madrid, América Latina). → segment = the whole name.
 Otherwise: segment = just the tapped word.
 

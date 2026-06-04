@@ -76,6 +76,11 @@ THE TRANSLATION must cover, within the anchored lexical entry only:
 - Common SYNONYMS in ${args.native_language} (1–3, only when they meaningfully exist — don't pad).
 - Other distinct SENSES of the same lexical entry if it's polysemous within its word class. Tag each with a 1–3 word disambiguator in parentheses.
 
+CRITICAL — synonyms ≠ senses. A "sense" is a DIFFERENT MEANING the word can carry in a different real-world context. A "synonym" is an alternative ${args.native_language} word for the SAME meaning. Test before using "auch:":
+- Can the two translations be used interchangeably in the same sentence with the same effect? → they are synonyms, not senses. Put them under "Synonyme:" or pick the better one. NEVER use "auch:".
+- Can each translation only apply in a different real-world context (bank-money vs bank-bench; candle vs sail; fire-flame vs fire-passion)? → they are senses. Use "auch:".
+If you have nothing that meets the "auch:" bar, omit "auch:" entirely. A card with one clean primary translation is better than a card with a fake second sense.
+
 Format the translation as a compact readable string. Pattern:
   <primary translation>; Synonyme: <syn1>, <syn2>; auch: <other sense> (<short tag>)
 Drop any section that doesn't apply. Keep it tight — this is shown on a flashcard, not a dictionary entry. Use ${args.native_language} for the section labels (the example uses German; adapt to the learner's native language).
@@ -110,6 +115,13 @@ Cross-POS homographs — do NOT mention the other word:
 - "para" (sense: "for / in order to — preposition")
     → translation: "für, um zu (Zweck)"
        hint: "Ein Geschenk für meine Mutter."
+
+Anti-example — DO NOT make this mistake:
+- "te haya llamado la atención" (sense: "has caught your attention")
+    ❌ "aufgefallen ist; auch: bemerkt hat"
+       (these are synonyms, not different senses — "auch:" is wrong here)
+    ✅ "(es) hat dir aufgefallen / hat deine Aufmerksamkeit erregt (Konjunktiv Perfekt von 'llamar la atención')"
+       (one primary translation with a synonym variant; no fake second sense)
 
 Standard cases — no homograph conflict:
 - "casa" (sense: "house / dwelling")
