@@ -134,6 +134,7 @@ The learner has tapped a single word in a ${targetName} sentence because they do
 TASK 1 — DECIDE THE SEGMENT (target-language side)
 Decide whether the tapped word stands ALONE or belongs to a multi-word unit. Group it with related words when:
 - The word is an article ("el", "la", "los", "las", "un", "una", "unos", "unas") and a noun follows → segment = article + noun ("el libro").
+- The word is a NOUN directly modified by one or more ATTRIBUTIVE adjectives, or is itself such an ATTRIBUTIVE adjective → segment = noun + its adjective(s) ("talento joven", "equipos grandes"). Tapping the noun or the adjective returns the SAME unit — the learner sees the pair as one chunk either way. This does NOT apply to PREDICATIVE adjectives (after ser/estar/parecer: in "el equipo es grande", tapping "grande" → segment = just "grande").
 - The word is part of a COMPOUND TENSE: haber + past participle (he visto, había dicho, haya impresionado), estar + gerund (está hablando), ir a + infinitive (voy a hacer), modal periphrases (tener que ir, hay que hacerlo). Include any clitic object pronouns attached to the verbal complex (me, te, lo, la, le, nos, os, los, las, les, se). → segment = the whole construction.
 - The word is part of a LIGHT-VERB IDIOM where the verb is semantically incomplete without a fixed noun argument (llamar la atención, tener miedo, tener ganas, tener hambre, tener sed, tener sueño, tener razón, tener suerte, tener prisa, tener cuidado, hacer caso, hacer falta, dar igual, dar pena, dar miedo, dar asco, tomar el pelo, prestar atención, poner atención, perder la cabeza, echar de menos, darse cuenta). The segment INCLUDES the fixed noun, even when the verb is conjugated and/or in a compound tense and/or carries a clitic. Examples:
   · tapped word in "no he tenido miedo" → segment = "he tenido miedo"
@@ -153,6 +154,9 @@ Rule per grammatical type of the segment:
 
 NOUN → include the ${args.nativeLanguage} definite article with correct gender.
   "diseño" → "das Design"  ·  "casa" → "das Haus"  ·  "Estados Unidos" → "die Vereinigten Staaten"
+
+NOUN + ATTRIBUTIVE ADJECTIVE(S) → definite article + adjective(s) INFLECTED to agree with the noun, like a dictionary phrase entry. Never the bare adjective lemma here.
+  "talento joven" → "das junge Talent"  ·  "equipos grandes" → "die großen Mannschaften"
 
 CONJUGATED VERB or COMPOUND TENSE (with or without clitics) → include the subject pronoun:
   · 1st / 2nd person: ALWAYS include (ich, du, wir, ihr, Sie).
