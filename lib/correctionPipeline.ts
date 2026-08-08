@@ -4,7 +4,7 @@
 // extra HTTP hop. Each function is self-contained: same input shape +
 // nativeLanguage/style produces the same output.
 
-import { chatJSON, type ChatTask } from "./llm";
+import { chatJSON, chatTextStream, type ChatTask } from "./llm";
 import { describeTargetLanguage, type TargetLanguageSpec } from "./targetLanguage";
 import type { Pair } from "@/types/correction";
 
@@ -22,6 +22,8 @@ export async function interpret(
   transcript: string,
   nativeLanguage: string,
   targetLanguage: TargetLanguageSpec,
+  /** Bench override — only the model-bench playground sets this. */
+  benchModel?: string,
 ): Promise<Interpretation> {
   const targetName = targetLanguage.language;
   const systemPrompt = `You are a bilingual interpretation assistant. A language learner is trying to speak ${targetName} but may mix in their native language (${nativeLanguage}) and may have grammar mistakes or unnatural phrasing.
@@ -47,6 +49,7 @@ Return ONLY valid JSON:
   return chatJSON<Interpretation>({
     task: "chat_light",
     label: "interpret",
+    benchModel,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: transcript },
@@ -56,7 +59,22 @@ Return ONLY valid JSON:
 
 // ── localize ─────────────────────────────────────────────────────────────
 
-function naturalPrompt(nativeLanguage: string, targetLanguage: TargetLanguageSpec): string {
+// Output-format tail is parameterised: the buffered call keeps the JSON
+// contract, the streaming call asks for plain text so tokens can render
+// as they arrive. Everything above the tail — model, rules, examples —
+// is byte-identical, so correction quality is unaffected.
+function plainOrJsonTail(plainOutput: boolean, targetName: string): string {
+  return plainOutput
+    ? `Return ONLY the ${targetName} text. No JSON, no quotes, no preamble, no formatting.`
+    : `Return ONLY valid JSON:
+{ "local_version_target": "string" }`;
+}
+
+function naturalPrompt(
+  nativeLanguage: string,
+  targetLanguage: TargetLanguageSpec,
+  plainOutput = false,
+): string {
   const target = describeTargetLanguage(targetLanguage);
   const targetName = targetLanguage.language;
   return `You are a native ${targetName} speaker. Your job is to express the given meaning in natural, ${target} as it would be spoken in casual conversation.
@@ -68,11 +86,14 @@ Rules:
 - Always write numbers as words, never as digits.
 - End with appropriate punctuation.
 
-Return ONLY valid JSON:
-{ "local_version_target": "string" }`;
+${plainOrJsonTail(plainOutput, targetName)}`;
 }
 
-function transcriptAwarePrompt(nativeLanguage: string, targetLanguage: TargetLanguageSpec): string {
+function transcriptAwarePrompt(
+  nativeLanguage: string,
+  targetLanguage: TargetLanguageSpec,
+  plainOutput = false,
+): string {
   const target = describeTargetLanguage(targetLanguage);
   const targetName = targetLanguage.language;
   return `You are a ${targetName}-language correction engine for a learner.
@@ -94,8 +115,7 @@ Other rules:
 - Always write numbers as words, never as digits.
 - End with appropriate punctuation.
 
-Return ONLY valid JSON:
-{ "local_version_target": "string" }`;
+${plainOrJsonTail(plainOutput, targetName)}`;
 }
 
 export async function localize(args: {
@@ -108,6 +128,8 @@ export async function localize(args: {
    *  production correctness. The /playground/correct-test page passes
    *  chat_light so we can A/B compare quality on the cheaper tier. */
   task?: ChatTask;
+  /** Bench override — only the model-bench playground sets this. */
+  benchModel?: string;
 }): Promise<string> {
   const useTranscript = args.style === "transcript_aware" && args.transcript?.trim();
   const systemPrompt = useTranscript
@@ -120,13 +142,47 @@ export async function localize(args: {
   const task = args.task ?? "chat_precise";
   const result = await chatJSON<{ local_version_target?: string }>({
     task,
-    label: `localize/${task}`,
+    label: `localize/${args.benchModel ?? task}`,
+    benchModel: args.benchModel,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent },
     ],
   });
   return (result.local_version_target ?? "").trim();
+}
+
+/**
+ * Streaming variant of localize for the SSE correction flow. Same model,
+ * same rules — only the output-format tail differs (plain text instead of
+ * JSON) so tokens can hit the screen as they're generated.
+ */
+export async function localizeStream(args: {
+  intendedMeaning: string;
+  transcript?: string;
+  nativeLanguage: string;
+  targetLanguage: TargetLanguageSpec;
+  style: CorrectionStyle;
+  onDelta: (delta: string) => void;
+}): Promise<string> {
+  const useTranscript = args.style === "transcript_aware" && args.transcript?.trim();
+  const systemPrompt = useTranscript
+    ? transcriptAwarePrompt(args.nativeLanguage, args.targetLanguage, true)
+    : naturalPrompt(args.nativeLanguage, args.targetLanguage, true);
+  const userContent = useTranscript
+    ? `TRANSCRIPT: "${args.transcript!.trim()}"\nINTENT: "${args.intendedMeaning}"`
+    : args.intendedMeaning;
+
+  return chatTextStream({
+    task: "chat_precise",
+    label: "localize/stream",
+    maxTokens: 700,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ],
+    onDelta: args.onDelta,
+  });
 }
 
 // ── segment ──────────────────────────────────────────────────────────────
@@ -423,13 +479,16 @@ export async function segment(args: {
    *  + explicit compound-tense rule). V1 stays available via the
    *  playground toggle for comparison. */
   improvedPrompt?: boolean;
+  /** Bench override — only the model-bench playground sets this. */
+  benchModel?: string;
 }): Promise<Pair[]> {
   const task = args.task ?? "chat_light";
   const useV2 = args.improvedPrompt !== false; // default V2; only false explicitly disables
   const buildPrompt = useV2 ? segmentPromptV2 : segmentPrompt;
   const { pairs } = await chatJSON<{ pairs: Pair[] }>({
     task,
-    label: `segment/${task}${useV2 ? "/v2" : ""}`,
+    label: `segment/${args.benchModel ?? task}${useV2 ? "/v2" : ""}`,
+    benchModel: args.benchModel,
     userPrompt: buildPrompt(args.nativeLanguage, args.localVersionTarget, args.transcript, args.targetLanguage),
   });
   const normalized = normalizePairs(pairs);

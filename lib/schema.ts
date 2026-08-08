@@ -213,6 +213,32 @@ export const llmUsage = pgTable(
   }),
 );
 
+// ── sentence_annotations ─────────────────────────────────────────────────
+// Global (cross-user) cache for whole-sentence tap-lookup annotations.
+// cache_key = sha256 over normalized text + native language + target
+// language + prompt version + model (see lib/annotate.ts). Entries are
+// valid forever for their key; bumping ANNOTATE_PROMPT_VERSION or the
+// annotate model changes the key, so stale rows are simply never hit
+// again (cheap logical invalidation, no cleanup required).
+
+export const sentenceAnnotations = pgTable(
+  "sentence_annotations",
+  {
+    id: serial("id").primaryKey(),
+    cacheKey: text("cache_key").notNull(),
+    text: text("text").notNull(),
+    nativeLanguage: text("native_language").notNull(),
+    targetLanguageJson: text("target_language_json").notNull(),
+    promptVersion: integer("prompt_version").notNull(),
+    model: text("model").notNull(),
+    payload: text("payload").notNull(), // JSON SentenceAnnotation
+    createdAt: integer("created_at").notNull().default(nowSeconds),
+  },
+  (t) => ({
+    keyUnique: uniqueIndex("ux_sentence_annotations_key").on(t.cacheKey),
+  }),
+);
+
 // ── inferred row + insert types ──────────────────────────────────────────
 // Drizzle gives us $inferSelect / $inferInsert per table; the app uses
 // those instead of hand-written interfaces.

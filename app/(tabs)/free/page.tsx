@@ -11,6 +11,7 @@ import AudioRecorder from "@/components/AudioRecorder";
 import CorrectionBlock from "@/components/CorrectionBlock";
 import InterpretationLine from "@/components/InterpretationLine";
 import { useMe } from "@/components/MeProvider";
+import { correctTranscriptStream } from "@/lib/sseClient";
 import type { CorrectionResult } from "@/types/correction";
 
 type CorrectionStyle = "natural" | "transcript_aware";
@@ -18,7 +19,7 @@ type CorrectionStyle = "natural" | "transcript_aware";
 type Stage =
   | { kind: "ready"; result: CorrectionResult | null }
   | { kind: "transcribing" }
-  | { kind: "correcting"; transcript: string }
+  | { kind: "correcting"; transcript: string; interpretation: string | null; localized: string }
   | { kind: "error"; message: string };
 
 async function transcribeAudio(blob: Blob, nativeLanguage: string): Promise<string> {
@@ -31,21 +32,6 @@ async function transcribeAudio(blob: Blob, nativeLanguage: string): Promise<stri
   return transcript as string;
 }
 
-async function correctTranscript(args: {
-  transcript: string;
-  nativeLanguage: string;
-  style: CorrectionStyle;
-  overrideIntendedMeaning?: string;
-}): Promise<CorrectionResult> {
-  const res = await fetch("/api/correct", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(args),
-  });
-  if (!res.ok) throw new Error("Correction failed");
-  return res.json();
-}
-
 export default function FreeInputPage() {
   const me = useMe();
   const [stage, setStage] = useState<Stage>({ kind: "ready", result: null });
@@ -54,12 +40,20 @@ export default function FreeInputPage() {
     try {
       setStage({ kind: "transcribing" });
       const transcript = await transcribeAudio(blob, me.nativeLanguage);
-      setStage({ kind: "correcting", transcript });
-      const result = await correctTranscript({
-        transcript,
-        nativeLanguage: me.nativeLanguage,
-        style: me.correctionStyle,
-      });
+      setStage({ kind: "correcting", transcript, interpretation: null, localized: "" });
+      const result = await correctTranscriptStream(
+        {
+          transcript,
+          nativeLanguage: me.nativeLanguage,
+          style: me.correctionStyle,
+        },
+        {
+          onInterpretation: (t) =>
+            setStage((s) => (s.kind === "correcting" ? { ...s, interpretation: t } : s)),
+          onLocalizeDelta: (delta) =>
+            setStage((s) => (s.kind === "correcting" ? { ...s, localized: s.localized + delta } : s)),
+        },
+      );
       setStage({ kind: "ready", result });
     } catch (err) {
       setStage({ kind: "error", message: (err as Error).message });
@@ -72,14 +66,20 @@ export default function FreeInputPage() {
   async function handleReCorrect(override: string) {
     if (stage.kind !== "ready" || !stage.result) return;
     const transcript = stage.result.transcript_raw;
-    setStage({ kind: "correcting", transcript });
+    setStage({ kind: "correcting", transcript, interpretation: override, localized: "" });
     try {
-      const result = await correctTranscript({
-        transcript,
-        nativeLanguage: me.nativeLanguage,
-        style: me.correctionStyle,
-        overrideIntendedMeaning: override,
-      });
+      const result = await correctTranscriptStream(
+        {
+          transcript,
+          nativeLanguage: me.nativeLanguage,
+          style: me.correctionStyle,
+          overrideIntendedMeaning: override,
+        },
+        {
+          onLocalizeDelta: (delta) =>
+            setStage((s) => (s.kind === "correcting" ? { ...s, localized: s.localized + delta } : s)),
+        },
+      );
       setStage({ kind: "ready", result });
     } catch (err) {
       setStage({ kind: "error", message: (err as Error).message });
@@ -121,12 +121,29 @@ export default function FreeInputPage() {
           <div className="text-center text-sm text-rose-500 mb-6">{stage.message}</div>
         )}
 
-        {isProcessing && (
+        {stage.kind === "transcribing" && (
           <div className="flex flex-col items-center gap-2 mb-6">
             <span className="w-6 h-6 rounded-full border-2 border-neutral-200 border-t-neutral-600 animate-spin" />
-            <p className="text-xs text-neutral-500">
-              {stage.kind === "transcribing" ? "Transkribiere…" : `Korrigiere: "${stage.transcript}"`}
-            </p>
+            <p className="text-xs text-neutral-500">Transkribiere…</p>
+          </div>
+        )}
+
+        {stage.kind === "correcting" && (
+          <div className="mb-6 space-y-3">
+            {stage.interpretation ? (
+              <p className="text-xs text-neutral-400 italic">{stage.interpretation}</p>
+            ) : (
+              <p className="text-xs text-neutral-400 italic inline-flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full border-2 border-neutral-200 border-t-neutral-500 animate-spin" />
+                Verstehe: &bdquo;{stage.transcript}&ldquo;
+              </p>
+            )}
+            {stage.localized && (
+              <div className="rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-3 text-base leading-relaxed text-neutral-900">
+                <span className="whitespace-pre-wrap">{stage.localized}</span>
+                <span className="inline-block w-[2px] h-[1em] align-text-bottom bg-emerald-400 animate-pulse ml-0.5" />
+              </div>
+            )}
           </div>
         )}
 

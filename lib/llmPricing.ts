@@ -34,6 +34,8 @@ const CHAT_PRICES: Record<string, ChatPricing> = {
   "gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.6 },
   "gpt-4o": { inputPer1M: 2.5, outputPer1M: 10.0 },
   "grok-4-fast-non-reasoning": { inputPer1M: 0.2, outputPer1M: 0.5 },
+  "gemini-3.1-flash-lite": { inputPer1M: 0.25, outputPer1M: 1.5 },
+  "gemini-2.5-flash": { inputPer1M: 0.3, outputPer1M: 2.5 },
 };
 
 const AUDIO_PRICES: Record<string, AudioPricing> = {

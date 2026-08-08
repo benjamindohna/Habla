@@ -8,6 +8,7 @@ import {
   segment,
   type CorrectionStyle,
 } from "@/lib/correctionPipeline";
+import { getBenchModel } from "@/lib/llm";
 import { pushRecentInput, runLevelCheckIfDue } from "@/lib/levelTracker";
 import { autoSaveUnknownVocab } from "@/lib/extractUnknownVocab";
 import type { CorrectionResult } from "@/types/correction";
@@ -41,6 +42,10 @@ export async function POST(req: NextRequest) {
      *  (coverage-invariants first, more diverse worked examples).
      *  Default false → V1 (production-stable). */
     improvedSegmentPrompt?: boolean;
+    /** Experiment-only (mix-chat playground): per-step bench-model
+     *  override. Each value must be a BENCH_MODELS id; invalid ids
+     *  are ignored and the step runs on its production model. */
+    modelMix?: { interpret?: string; localize?: string; segment?: string };
   };
 
   const transcript = body.transcript?.trim();
@@ -66,10 +71,18 @@ export async function POST(req: NextRequest) {
   // Default V2 segment prompt — V1 only when client explicitly opts out.
   const useImprovedSegmentPrompt = body.improvedSegmentPrompt !== false;
 
+  // Bench-model overrides: only accept ids that exist in BENCH_MODELS,
+  // so a client can't route calls to arbitrary model strings.
+  const mixBench = (id?: string): string | undefined =>
+    id && getBenchModel(id) ? id : undefined;
+  const interpretBench = mixBench(body.modelMix?.interpret);
+  const localizeBench = mixBench(body.modelMix?.localize);
+  const segmentBench = mixBench(body.modelMix?.segment);
+
   try {
     const interpretation = override
       ? { intended_meaning_native: override, confidence: "high" as const, notes_native: "" }
-      : await interpret(transcript, nativeLanguage, user.targetLanguage);
+      : await interpret(transcript, nativeLanguage, user.targetLanguage, interpretBench);
 
     const local_version_target = await localize({
       intendedMeaning: interpretation.intended_meaning_native,
@@ -78,6 +91,7 @@ export async function POST(req: NextRequest) {
       targetLanguage: user.targetLanguage,
       style,
       task: localizeTask,
+      benchModel: localizeBench,
     });
 
     const pairs = await segment({
@@ -87,6 +101,7 @@ export async function POST(req: NextRequest) {
       targetLanguage: user.targetLanguage,
       task: segmentTask,
       improvedPrompt: useImprovedSegmentPrompt,
+      benchModel: segmentBench,
     });
 
     const result: CorrectionResult = {

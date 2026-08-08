@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { chatText } from "@/lib/llm";
+import { chatText, chatTextStream, getBenchModel } from "@/lib/llm";
+import { warmAnnotation } from "@/lib/annotate";
 import { getSession } from "@/lib/auth";
 import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
@@ -35,8 +36,16 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
     topic?: string;
     conversationId?: number;
+    /** Experiment-only (mix-chat playground): bench-model override for
+     *  the opener. Must be a BENCH_MODELS id; invalid ids ignored. */
+    replyModel?: string;
+    /** SSE mode: stream the opener as {type:"delta"} frames followed by
+     *  {type:"done"}. Default false keeps the JSON shape. */
+    stream?: boolean;
   };
   const { topic, conversationId: existingId } = body;
+  const replyBench =
+    body.replyModel && getBenchModel(body.replyModel) ? body.replyModel : undefined;
   if (!topic || typeof topic !== "string" || !topic.trim()) {
     return NextResponse.json({ error: "topic required" }, { status: 400 });
   }
@@ -65,11 +74,76 @@ Write a single opening message in ${target} that:
 
 Return ONLY the message text in ${targetName}. No JSON, no quotes, no preamble, no formatting.`;
 
+  // Resolve target conversation BEFORE generating — in stream mode we
+  // can't return a clean 404 once the SSE response has started.
+  let conversationId: number;
+  if (existingId !== undefined) {
+    const existing = await getConversation(existingId);
+    if (!existing || existing.user_id !== user.id) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
+    conversationId = existingId;
+    await updateConversationTopic(conversationId, topic.trim());
+  } else {
+    conversationId = await createConversation(user.id, topic.trim());
+  }
+
+  async function finishOpener(text: string) {
+    await appendMessage({
+      conversationId,
+      role: "ai",
+      textTarget: text,
+      segments: null,
+    });
+    // Warm the annotation cache so word-taps on the opener are instant.
+    warmAnnotation({
+      text,
+      nativeLanguage: user!.nativeLanguage,
+      targetLanguage: user!.targetLanguage,
+    });
+  }
+
+  if (body.stream) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: Record<string, unknown>) =>
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        try {
+          const text = await chatTextStream({
+            task: "chat_precise",
+            label: replyBench ? `converse/start/${replyBench}` : "converse/start",
+            benchModel: replyBench,
+            systemPrompt: prompt,
+            temperature: 0.7,
+            onDelta: (delta) => send({ type: "delta", delta }),
+          });
+          if (!text) throw new Error("Model returned no usable opener");
+          await finishOpener(text);
+          send({ type: "done", text, conversationId });
+        } catch (err) {
+          console.error("[/api/converse/start stream]", err);
+          send({ type: "error", message: (err as Error).message });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+    return new NextResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
   try {
     const text = (
       await chatText({
         task: "chat_precise",
-        label: "converse/start",
+        label: replyBench ? `converse/start/${replyBench}` : "converse/start",
+        benchModel: replyBench,
         systemPrompt: prompt,
         temperature: 0.7,
       })
@@ -77,27 +151,7 @@ Return ONLY the message text in ${targetName}. No JSON, no quotes, no preamble, 
     if (!text) {
       throw new Error("Model returned no usable opener");
     }
-
-    // Resolve target conversation: either reuse the empty one the
-    // client created on home-→-chat navigation, or create fresh for the
-    // legacy atomic shape.
-    let conversationId: number;
-    if (existingId !== undefined) {
-      const existing = await getConversation(existingId);
-      if (!existing || existing.user_id !== user.id) {
-        return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
-      }
-      conversationId = existingId;
-      await updateConversationTopic(conversationId, topic.trim());
-    } else {
-      conversationId = await createConversation(user.id, topic.trim());
-    }
-    await appendMessage({
-      conversationId,
-      role: "ai",
-      textTarget: text,
-      segments: null,
-    });
+    await finishOpener(text);
 
     return NextResponse.json({ conversationId, text });
   } catch (err) {

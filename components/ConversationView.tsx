@@ -7,6 +7,7 @@ import UserBubble from "./UserBubble";
 import SealedUserBubble from "./SealedUserBubble";
 import type { Topic } from "./TopicGrid";
 import { pickGreeting } from "@/lib/greetingVerb";
+import { correctTranscriptStream, readReplyStream } from "@/lib/sseClient";
 import type { TargetLanguageSpec } from "@/lib/targetLanguage";
 import type { CorrectionResult } from "@/types/correction";
 
@@ -15,6 +16,16 @@ interface TopicWithKind extends Topic {
 }
 
 type CorrectionStyle = "natural" | "transcript_aware";
+
+/** Experiment-only per-call model overrides (BENCH_MODELS ids). Unset
+ *  fields run on the production model. Only the mix-chat playground
+ *  passes this; the normal chat never sets it. */
+export interface ModelMix {
+  interpret?: string;
+  localize?: string;
+  segment?: string;
+  reply?: string;
+}
 
 export interface InitialMessage {
   id: number;
@@ -31,14 +42,19 @@ interface ConversationViewProps {
   nativeLanguage: string;
   targetLanguage: TargetLanguageSpec;
   correctionStyle: CorrectionStyle;
+  modelMix?: ModelMix;
   onBack: () => void;
   onLogout: () => void;
 }
 
 type Message =
-  | { id: string; role: "ai"; text?: string; muted?: boolean; loading?: boolean; isFresh?: boolean }
+  | { id: string; role: "ai"; text?: string; muted?: boolean; loading?: boolean; isFresh?: boolean; streaming?: boolean }
   | { id: string; role: "user-sealed"; textTarget: string }
-  | { id: string; role: "user"; result: CorrectionResult; doneAt: number | null; isFresh?: boolean };
+  | { id: string; role: "user"; result: CorrectionResult; doneAt: number | null; isFresh?: boolean }
+  // Progressive user turn while the correction streams in: interpretation
+  // appears first, then the corrected text token by token. Replaced by a
+  // full "user" message once the result (incl. pairs) lands.
+  | { id: string; role: "user-pending"; transcript: string; interpretation: string | null; localized: string };
 
 type PendingStatus =
   | { stage: "idle" }
@@ -62,6 +78,7 @@ async function correctTranscript(args: {
   overrideIntendedMeaning?: string;
   nativeLanguage: string;
   style: CorrectionStyle;
+  modelMix?: ModelMix;
 }): Promise<CorrectionResult> {
   const res = await fetch("/api/correct", {
     method: "POST",
@@ -70,6 +87,45 @@ async function correctTranscript(args: {
   });
   if (!res.ok) throw new Error("Correction failed");
   return res.json();
+}
+
+// ── Streaming user bubble ─────────────────────────────────────────────────
+// Progressive right-aligned bubble while the correction streams: the
+// interpretation line lands first (native language, small), then the
+// corrected target-language text grows token by token. Swapped for the
+// full UserBubble once pairs arrive.
+
+function StreamingUserBubble({
+  interpretation,
+  localized,
+}: {
+  interpretation: string | null;
+  localized: string;
+}) {
+  return (
+    <div className="flex justify-end">
+      <div className="w-full max-w-[92%] space-y-2">
+        <div className="flex justify-end">
+          {interpretation ? (
+            <p className="text-xs text-neutral-400 italic text-right">{interpretation}</p>
+          ) : (
+            <p className="text-xs text-neutral-300 italic inline-flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full border-2 border-neutral-200 border-t-neutral-500 animate-spin" />
+              Verstehe…
+            </p>
+          )}
+        </div>
+        {localized && (
+          <div className="flex justify-end">
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-3 text-base leading-relaxed text-neutral-900">
+              <span className="whitespace-pre-wrap">{localized}</span>
+              <span className="inline-block w-[2px] h-[1em] align-text-bottom bg-emerald-400 animate-pulse ml-0.5" />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -81,6 +137,7 @@ export default function ConversationView({
   nativeLanguage,
   targetLanguage,
   correctionStyle,
+  modelMix,
   onBack,
   onLogout,
 }: ConversationViewProps) {
@@ -213,17 +270,45 @@ export default function ConversationView({
       const res = await fetch("/api/converse/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId, topic: picked.target }),
+        body: JSON.stringify({
+          conversationId,
+          topic: picked.target,
+          stream: true,
+          ...(modelMix?.reply ? { replyModel: modelMix.reply } : {}),
+        }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { conversationId: number; text: string };
+      const openerId = crypto.randomUUID();
       setTopic(picked.target);
-      setMessages([
-        { id: crypto.randomUUID(), role: "ai", text: data.text, isFresh: true },
-      ]);
       setTopicPickerOpen(false);
+      setMessages([{ id: openerId, role: "ai", loading: true, isFresh: true }]);
+      setPickingTopic(null);
+      const data = await readReplyStream(res, (delta) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === openerId && m.role === "ai"
+              ? { ...m, text: (m.text ?? "") + delta, loading: false, streaming: true }
+              : m,
+          ),
+        );
+      });
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === openerId && m.role === "ai"
+            ? { ...m, text: data.text, loading: false, streaming: false }
+            : m,
+        ),
+      );
     } catch (err) {
       console.error("[handleTopicPick]", err);
+      // If the opener bubble was already appended, surface the failure
+      // there instead of leaving an eternal loading bubble.
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.role === "ai" && (m.loading || m.streaming)
+            ? { ...m, text: `(Konnte den Chat nicht starten: ${(err as Error).message})`, loading: false, streaming: false, muted: true }
+            : m,
+        ),
+      );
     } finally {
       setPickingTopic(null);
     }
@@ -261,6 +346,7 @@ export default function ConversationView({
       overrideIntendedMeaning: overrideInterpretation,
       nativeLanguage,
       style: correctionStyle,
+      modelMix,
     });
   }
 
@@ -268,12 +354,58 @@ export default function ConversationView({
     try {
       setPending({ stage: "processing", step: "Transcribing audio…" });
       const transcript = await transcribeAudio(blob, nativeLanguage);
-      const result = await runPipeline(transcript);
+
+      // Playground model-mix runs stay on the buffered endpoint (the
+      // stream route has no bench overrides). Normal chats stream.
+      if (modelMix && (modelMix.interpret || modelMix.localize || modelMix.segment)) {
+        const result = await runPipeline(transcript);
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: "user", result, doneAt: null, isFresh: true },
+        ]);
+        setPending({ stage: "idle" });
+        return;
+      }
+
+      // Streaming path: show a progressive bubble immediately and fill it
+      // as interpretation + corrected text arrive; swap in the full
+      // correction view once pairs land.
+      const pendingId = crypto.randomUUID();
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "user", result, doneAt: null, isFresh: true },
+        { id: pendingId, role: "user-pending", transcript, interpretation: null, localized: "" },
       ]);
       setPending({ stage: "idle" });
+      const patchPending = (patch: Partial<Extract<Message, { role: "user-pending" }>>) =>
+        setMessages((prev) =>
+          prev.map((m) => (m.id === pendingId && m.role === "user-pending" ? { ...m, ...patch } : m)),
+        );
+      try {
+        const result = await correctTranscriptStream(
+          { transcript, nativeLanguage, style: correctionStyle },
+          {
+            onInterpretation: (t) => patchPending({ interpretation: t }),
+            onLocalizeDelta: (delta) =>
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === pendingId && m.role === "user-pending"
+                    ? { ...m, localized: m.localized + delta }
+                    : m,
+                ),
+              ),
+          },
+        );
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === pendingId
+              ? { id: pendingId, role: "user", result, doneAt: null, isFresh: true }
+              : m,
+          ),
+        );
+      } catch (err) {
+        setMessages((prev) => prev.filter((m) => m.id !== pendingId));
+        throw err;
+      }
     } catch (err) {
       setPending({ stage: "error", message: (err as Error).message });
     }
@@ -319,15 +451,24 @@ export default function ConversationView({
           userTextTarget: userMsg.result.local_version_target,
           userRaw: userMsg.result.transcript_raw,
           segments: userMsg.result.pairs,
+          stream: true,
+          ...(modelMix?.reply ? { replyModel: modelMix.reply } : {}),
         }),
       });
-      if (!res.ok) throw new Error("Reply failed");
-      const data = (await res.json()) as { text: string; derivedTopic?: string };
+      const data = await readReplyStream(res, (delta) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === loadingId && m.role === "ai"
+              ? { ...m, text: (m.text ?? "") + delta, loading: false, streaming: true }
+              : m,
+          ),
+        );
+      });
       if (data.derivedTopic) setTopic(data.derivedTopic);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === loadingId && m.role === "ai"
-            ? { ...m, text: data.text, loading: false }
+            ? { ...m, text: data.text, loading: false, streaming: false }
             : m,
         ),
       );
@@ -428,12 +569,22 @@ export default function ConversationView({
                   text={msg.text}
                   muted={msg.muted}
                   loading={msg.loading}
+                  streaming={msg.streaming}
                   autoPlay={autoRead && !!msg.isFresh}
                 />
               );
             }
             if (msg.role === "user-sealed") {
               return <SealedUserBubble key={msg.id} textTarget={msg.textTarget} />;
+            }
+            if (msg.role === "user-pending") {
+              return (
+                <StreamingUserBubble
+                  key={msg.id}
+                  interpretation={msg.interpretation}
+                  localized={msg.localized}
+                />
+              );
             }
             // User turn that's already been Done'd → collapse the rich
             // correction view into a sealed bubble. The full view stays

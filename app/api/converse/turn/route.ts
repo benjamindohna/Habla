@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { chatText, type ChatMessage } from "@/lib/llm";
+import { chatText, chatTextStream, getBenchModel, type ChatMessage } from "@/lib/llm";
+import { warmAnnotation } from "@/lib/annotate";
 import { getSession } from "@/lib/auth";
 import { withRouteUsage } from "@/lib/usageContext";
 import { getUserById } from "@/lib/users";
@@ -32,8 +33,17 @@ export async function POST(req: NextRequest) {
     userTextTarget?: string;
     userRaw?: string;
     segments?: Pair[];
+    /** Experiment-only (mix-chat playground): bench-model override for
+     *  the AI reply. Must be a BENCH_MODELS id; invalid ids ignored. */
+    replyModel?: string;
+    /** SSE mode: stream the reply as {type:"delta"} frames followed by a
+     *  {type:"done"} frame. Default false keeps the JSON shape for older
+     *  callers (playground pages). */
+    stream?: boolean;
   };
   const { conversationId, userTextTarget, userRaw, segments } = body;
+  const replyBench =
+    body.replyModel && getBenchModel(body.replyModel) ? body.replyModel : undefined;
 
   if (typeof conversationId !== "number" || !conversationId) {
     return NextResponse.json({ error: "conversationId required" }, { status: 400 });
@@ -114,6 +124,70 @@ Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no
     });
   }
 
+  // Shared post-generation side effects: persist the AI turn, label the
+  // conversation if needed, warm the annotation cache so word-taps on the
+  // fresh bubble resolve instantly.
+  async function finishReply(text: string, derivedTopic: string | null) {
+    if (derivedTopic && needsTopic) {
+      await updateConversationTopic(conversationId!, derivedTopic);
+    }
+    await appendMessage({
+      conversationId: conversationId!,
+      role: "ai",
+      textTarget: text,
+      segments: null,
+    });
+    warmAnnotation({
+      text,
+      nativeLanguage: user!.nativeLanguage,
+      targetLanguage: user!.targetLanguage,
+    });
+  }
+
+  if (body.stream) {
+    const encoder = new TextEncoder();
+    const t0 = Date.now();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: Record<string, unknown>) =>
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        try {
+          const [text, derivedTopic] = await Promise.all([
+            chatTextStream({
+              task: "chat_precise",
+              label: replyBench ? `converse/turn/${replyBench}` : "converse/turn",
+              benchModel: replyBench,
+              messages,
+              temperature: 0.7,
+              onDelta: (delta) => send({ type: "delta", delta }),
+            }),
+            topicPromise,
+          ]);
+          if (!text) throw new Error("Model returned no usable reply");
+          await finishReply(text, derivedTopic);
+          send({
+            type: "done",
+            text,
+            ...(derivedTopic && needsTopic ? { derivedTopic } : {}),
+          });
+          console.log(`[timing] converse/turn stream total=${Date.now() - t0}ms`);
+        } catch (err) {
+          console.error("[/api/converse/turn stream]", err);
+          send({ type: "error", message: (err as Error).message });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+    return new NextResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
   try {
     // Fire AI turn and topic derivation in parallel — both depend only
     // on the just-appended user message, so neither needs to wait for
@@ -122,7 +196,8 @@ Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no
     const [text, derivedTopic] = await Promise.all([
       chatText({
         task: "chat_precise",
-        label: "converse/turn",
+        label: replyBench ? `converse/turn/${replyBench}` : "converse/turn",
+        benchModel: replyBench,
         messages,
         temperature: 0.7,
       }).then((s) => s.trim()),
@@ -131,16 +206,7 @@ Return ONLY the reply text in ${targetName}. No JSON, no quotes, no preamble, no
     if (!text) {
       throw new Error("Model returned no usable reply");
     }
-    if (derivedTopic && needsTopic) {
-      await updateConversationTopic(conversationId, derivedTopic);
-    }
-
-    await appendMessage({
-      conversationId,
-      role: "ai",
-      textTarget: text,
-      segments: null,
-    });
+    await finishReply(text, derivedTopic);
 
     return NextResponse.json({
       text,

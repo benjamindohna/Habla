@@ -4,6 +4,37 @@ Things to do later — out of scope for the current phase but tracked so they do
 
 ---
 
+## Auto-vocab extractor: capture non-literal CONSTRUCTIONS, not just lexical gaps
+
+**Trigger:** mix-chat session 2026-06-12 — corrected version contained *"A uno de ellos ya lo conozco, pero al otro no lo conozco"*; extractor saved only single words/short phrases (`prepararme`, `en particular`, …) and skipped the construction entirely.
+**Status:** design gap in `lib/extractUnknownVocab.ts`, confirmed empirically; user explicitly wants these as vocab entries.
+
+### Problem
+
+The extractor's UNKNOWN-criteria are purely lexical (native-word substitution, wrong word, dropped content word). Structural patterns the learner cannot produce — here: a-personal + clitic doubling + topicalisation ("A uno… ya LO conozco") — slip through twice over:
+
+1. The learner knew every content word (`conocer`, `uno`, `ellos`) — no lexical trigger fires.
+2. The information lives in function words (`a`, `lo`) which the prompt explicitly says to skip.
+
+### Acceptance criterion (user's wording, paraphrased)
+
+A phrase qualifies when **a literal word-by-word translation from the native language would never produce it** — i.e. the pattern is non-compositional across the language pair. From the trigger sentence, exactly these two should have been saved:
+
+- `A uno de ellos ya lo conozco`
+- `pero al otro no lo conozco`
+
+### Fix sketch
+
+Add ONE new extraction category to the prompt (alongside the existing lexical rules, not replacing them): "STRUCTURAL PATTERN — a clause from the CORRECT VERSION whose grammar diverges so strongly from the ${nativeLanguage} equivalent that a literal translation would never produce it (clitic doubling, a-personal with topicalisation, se-passives, gustar-type inversion…). Save the whole clause as spoken." Plus one worked example (the conocer sentence). Keep the 5-entry cap.
+
+Open question: how these render as cards — clause cards practise differently than word cards (recognition fine, production mode needs thought). Don't block extraction on solving the card UX.
+
+### Why it's deferred
+
+Touches the same prompt the lexical extraction depends on — needs a quick regression check against a handful of past turns (the prompt is doing well on those today). Half a day including testing.
+
+---
+
 ## Vocab comparator: detect garbage descriptions before splitting into polysemy
 
 **Trigger:** vocab save flow — `compareVocabDescriptions` in `lib/vocab.ts`
@@ -261,3 +292,11 @@ The TTS route (`app/api/tts/route.ts`) calls `gpt-4o-mini-tts` with a fixed voic
 Sits alongside the broader "Per-user target language spec" backlog item — same lever, additional surface (prompt phrasing today, TTS next, eventually transcription prompt).
 
 ---
+
+## Latenz: Audio-Chunk-Upload während der Aufnahme + optimistisches Vorarbeiten
+
+**Trigger:** Latenz-Spec 2026-08-08, Änderungen 5 + 6 — bewusst zurückgestellt beim Umbau auf Vorab-Annotation + Streaming (siehe `LATENCY_NOTES.md`).
+
+- **Chunk-Upload (Änderung 5):** MediaRecorder liefert Chunks schon während der Aufnahme; heute wird erst nach Stopp als Ganzes hochgeladen. Offene Designfrage vor dem Bau: serverless-taugliche Session-Haltung (Chunks + Finalize teilen sich auf Vercel keinen Prozess) — Kandidaten: Blob-Store pro Upload-Session, kleiner WebSocket-Service, oder Single-Request-Streaming mit `duplex: "half"` (iOS-WebView-Support prüfen). Erwartet: 0,5–1 s pro Sprach-Input.
+- **Optimistisch (Änderung 6):** VAD-Pause (~600–800 ms Stille) → Transkription vorab anstoßen, bei Weitersprechen verwerfen und final IMMER auf dem Gesamt-Audio rechnen. Nach Änderung 5 umsetzen.
+- **Annotations-Modell-Eval (Rest von Änderung 4):** 30–50 repräsentative Sätze (inkl. Wortpaare, die mal Einheit sind und mal nicht) gegen Flash-Lite / Haiku / Groq-Klasse; Infrastruktur liegt im model-bench-Playground.

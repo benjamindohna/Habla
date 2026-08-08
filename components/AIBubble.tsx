@@ -37,6 +37,20 @@ interface LookupResult {
   indices: number[];
 }
 
+/** Mirror of lib/annotate.ts:SentenceAnnotation (client-safe copy — the
+ *  lib module transitively pulls server-only deps). */
+interface AnnotationSpan {
+  id: number;
+  indices: number[];
+  text: string;
+  translation: string | null;
+}
+interface SentenceAnnotation {
+  words: string[];
+  spans: AnnotationSpan[];
+  tokenToSpan: Record<number, number>;
+}
+
 type LookupState =
   | { kind: "loading" }
   | { kind: "done"; result: LookupResult }
@@ -64,6 +78,10 @@ interface AIBubbleProps {
    *  by ConversationView based on (autoRead toggle && this is a fresh
    *  message added during the session). */
   autoPlay?: boolean;
+  /** True while the message text is still being streamed in. Suppresses
+   *  TTS preload and annotation prefetch until the text is final —
+   *  otherwise every token delta would refire both effects. */
+  streaming?: boolean;
 }
 
 export default function AIBubble({
@@ -72,10 +90,36 @@ export default function AIBubble({
   loading = false,
   disableSave = false,
   autoPlay = false,
+  streaming = false,
 }: AIBubbleProps) {
   const [open, setOpen] = useState<OpenState | null>(null);
   const [lookups, setLookups] = useState<Map<number, LookupState>>(new Map());
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // ── Pre-annotation ────────────────────────────────────────────────────
+  // As soon as the final text is on screen, fetch the whole-sentence
+  // annotation in the background (server: cache → tiny model). Taps then
+  // resolve locally with zero network; a tap racing the fetch awaits the
+  // SAME promise — never a second, redundant call. Spans the annotator
+  // missed (translation: null) fall back to the live per-word endpoint.
+  const annotationRef = useRef<Promise<SentenceAnnotation | null> | null>(null);
+  const savedSegmentsRef = useRef<Set<number>>(new Set());
+  // Bumped whenever text changes so in-flight tap resolutions from a
+  // previous text can detect they're stale and drop their result.
+  const generationRef = useRef(0);
+
+  useEffect(() => {
+    annotationRef.current = null;
+    savedSegmentsRef.current = new Set();
+    if (!text || muted || loading || streaming) return;
+    annotationRef.current = fetch("/api/annotate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<SentenceAnnotation>) : null))
+      .catch(() => null);
+  }, [text, muted, loading, streaming]);
 
   // ── TTS state ─────────────────────────────────────────────────────────
   const [ttsBlob, setTtsBlob] = useState<Blob | null>(null);
@@ -87,7 +131,7 @@ export default function AIBubble({
   // Preload TTS as soon as text is available. Auto-play once when the
   // blob lands if autoPlay was true at that moment.
   useEffect(() => {
-    if (!text || muted || loading) return;
+    if (!text || muted || loading || streaming) return;
     autoPlayedRef.current = false;
     setTtsBlob(null);
     setTtsLoading(true);
@@ -117,7 +161,7 @@ export default function AIBubble({
     // intentionally NOT depending on autoPlay so that toggling Auto-Read
     // mid-bubble doesn't retroactively play already-arrived messages.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, muted, loading]);
+  }, [text, muted, loading, streaming]);
 
   // Cleanup any running audio on unmount.
   useEffect(() => {
@@ -160,6 +204,7 @@ export default function AIBubble({
 
   // Reset on text change.
   useEffect(() => {
+    generationRef.current += 1;
     setOpen(null);
     setLookups(new Map());
   }, [text]);
@@ -196,22 +241,33 @@ export default function AIBubble({
     };
   }, [open]);
 
-  function handleWordTap(token: Extract<Token, { kind: "word" }>, button: HTMLButtonElement) {
-    if (!text) return;
-    if (open?.wordIndex === token.wordIndex) {
-      setOpen(null);
-      return;
-    }
-    const rect = button.getBoundingClientRect();
-    setOpen({ wordIndex: token.wordIndex, word: token.text, rect });
-    if (lookups.has(token.wordIndex)) return;
-
+  function applyLookup(result: LookupResult, tappedIndex: number, spanId: number | null) {
     setLookups((prev) => {
       const next = new Map(prev);
-      next.set(token.wordIndex, { kind: "loading" });
+      const state: LookupState = { kind: "done", result };
+      for (const idx of result.indices) next.set(idx, state);
       return next;
     });
+    // Vocab save: once per segment per bubble (mirrors the old "only the
+    // first tap saves" behaviour — cached re-taps never re-saved either).
+    const saveKey = spanId ?? -1 - tappedIndex;
+    if (!disableSave && !savedSegmentsRef.current.has(saveKey)) {
+      savedSegmentsRef.current.add(saveKey);
+      fetch("/api/me/vocab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          segment: result.segment,
+          context: text,
+          wordIndex: tappedIndex,
+        }),
+      }).catch(() => {});
+    }
+  }
 
+  /** Live per-word call — fallback when no annotation is available or the
+   *  annotator produced no gloss for this span. */
+  function liveLookup(token: Extract<Token, { kind: "word" }>, generation: number) {
     fetch("/api/playground/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -229,31 +285,59 @@ export default function AIBubble({
         return res.json() as Promise<LookupResult>;
       })
       .then((result) => {
-        setLookups((prev) => {
-          const next = new Map(prev);
-          const state: LookupState = { kind: "done", result };
-          for (const idx of result.indices) next.set(idx, state);
-          return next;
-        });
-        if (!disableSave) {
-          fetch("/api/me/vocab", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              segment: result.segment,
-              context: text,
-              wordIndex: token.wordIndex,
-            }),
-          }).catch(() => {});
-        }
+        if (generation !== generationRef.current) return;
+        applyLookup(result, token.wordIndex, null);
       })
       .catch((err: Error) => {
+        if (generation !== generationRef.current) return;
         setLookups((prev) => {
           const next = new Map(prev);
           next.set(token.wordIndex, { kind: "error", message: err.message });
           return next;
         });
       });
+  }
+
+  function handleWordTap(token: Extract<Token, { kind: "word" }>, button: HTMLButtonElement) {
+    if (!text) return;
+    if (open?.wordIndex === token.wordIndex) {
+      setOpen(null);
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    setOpen({ wordIndex: token.wordIndex, word: token.text, rect });
+    if (lookups.has(token.wordIndex)) return;
+
+    setLookups((prev) => {
+      const next = new Map(prev);
+      next.set(token.wordIndex, { kind: "loading" });
+      return next;
+    });
+
+    const generation = generationRef.current;
+    const annotationPromise = annotationRef.current;
+
+    void (async () => {
+      // Preferred path: resolve from the pre-annotation. If the fetch is
+      // still in flight we await it here — no second call is fired.
+      const annotation = annotationPromise ? await annotationPromise : null;
+      if (generation !== generationRef.current) return;
+
+      const spanId = annotation?.tokenToSpan?.[token.wordIndex];
+      const span = spanId !== undefined ? annotation?.spans?.[spanId] : undefined;
+      // Sanity guard: server and client must agree on tokenisation.
+      const aligned = annotation?.words?.[token.wordIndex] === token.text;
+
+      if (span && aligned && span.translation) {
+        applyLookup(
+          { segment: span.text, translation: span.translation, indices: span.indices },
+          token.wordIndex,
+          span.id,
+        );
+        return;
+      }
+      liveLookup(token, generation);
+    })();
   }
 
   // ── Render ────────────────────────────────────────────────────────────
