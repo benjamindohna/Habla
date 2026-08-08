@@ -23,3 +23,5 @@ ios/App/build/
 ios/App/Podfile.lock
 ios/.gradle/
 Screenshot*.png
+.vercel
+.env*
