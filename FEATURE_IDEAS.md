@@ -369,3 +369,25 @@ Der Korrektur-Loop liefert perfekten Input, aber was der User damit *tut*, entsc
 
 - Wo genau im Onboarding (hängt am ONBOARDING_PLAN)?
 - Nudge-Stärke: reine Empfehlung vs. UI-Verstärkung (z.B. Reihenfolge der Buttons)?
+
+---
+
+## 13. Themen-Schwierigkeit: level-bewusste Empfehlungen statt Pauschal-Drosselung
+
+**What it is**
+
+Themen tragen ein natürliches Sprachniveau in sich (Küche/Wochenende vs. Funktionsweise eines Autos, Geschichte der Kulinarik). Die Belastung liegt dabei vor allem auf der PRODUKTION des Users: Die KI kann jedes Thema einfach besprechen, aber ein Anfänger kann bei schweren Themen nicht antworten, ohne dass ihm pro Satz viele Wörter fehlen (Überforderung = zu hohe Lückendichte pro Turn). Drei Bausteine, alle Empfehlung/Signal — nie Gate:
+
+1. **Level-bewusste Themen-Generierung:** Der Topic-Generator (4-3-2 / Picker) kennt heute das Level nicht. Für niedrige Level konkrete Alltagsdomänen gewichten (Küche und ihre Bestandteile, Wochenendaktivitäten, Wegbeschreibungen); Abstraktes/Fachliches mischt sich erst mit steigendem Level ein. Diese Themen erscheinen als startbare Vorschläge (KI macht die erste Nachricht).
+2. **Gezielter Mismatch-Hinweis bei selbst gestarteten Themen:** Themen-Schwierigkeit kurz schätzen (Mini-LLM-Call; später evtl. über user_vocab-Abdeckung der themen-typischen Wörter). NUR bei Mismatch einen Hinweis zeigen ("Dieses Thema braucht typischerweise Vokabular über deinem Level — probier's gern, oder nimm eins von diesen…"). Kein Pauschal-Text bei jedem Start (wird ignoriert + wirkt bevormundend). Nie blockieren.
+3. **Themen-Schwierigkeit moduliert die Drosselung:** Derselbe User bekommt bei einem schweren Thema eine KI, die Fachvokabular bewusst einfacher umschreibt oder beiläufig glossiert — die Ceiling gilt dann pro (User × Thema), nicht nur pro User.
+
+**Why it's interesting**
+
+Ergänzt die Ceiling-Umstellung in `describeLevelForPrompt` (Level limitiert nur noch aus einer Richtung, ab 96+ null Drosselung): Die Ceiling regelt WIE die KI spricht, die Themen-Bausteine regeln WORÜBER gesprochen wird — zusammen verhindern sie Überforderung, ohne Freiheit zu nehmen.
+
+**Open questions**
+
+- Schwierigkeits-Skala fürs Thema: gleiche 1-100-Skala wie das User-Level?
+- Wann user_vocab-Abdeckung statt LLM-Schätzung (braucht themen-typische Wortlisten)?
+- Andockpunkt: eigenständig bauen oder direkt im THEMES_PLAN (Themes haben ohnehin Level + gegatetes Vokabular)?

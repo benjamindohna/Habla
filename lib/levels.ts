@@ -519,25 +519,59 @@ function lengthDirectiveForLevel(level: number): string {
 }
 
 /**
- * Renders the learner's level as a compact, prompt-ready block —
- * level number + CEFR anchor + abilities + concrete examples + a
- * length directive + a "aim slightly above this" instruction. Used
- * in chat prompts where the AI message should target the learner's
- * complexity ceiling. Picks the per-language ranges table based on
- * targetLanguage so the examples and grammar references match what
- * the learner is actually studying.
+ * Renders the learner's level as a compact, prompt-ready block. Used
+ * in chat prompts (openers, replies) to bound message complexity.
+ *
+ * DESIGN: the level is a one-sided limiter — a CEILING that dissolves
+ * as the learner advances, never a target to perform.
+ *   - ≤50: full throttle WITH gentle stretch ("aim slightly above",
+ *     the classic i+1) — at these levels overwhelm is the real risk
+ *     and a nudge upward is pedagogically right.
+ *   - 51-85: ceiling only. No "aim above": natural speech within the
+ *     bound, never reaching for harder words to match the level.
+ *   - 86-95: essentially unthrottled; only the most obscure registers
+ *     held back. No range examples — they anchor the model into
+ *     PERFORMING a level (stilted thesaurus-speak) instead of just
+ *     talking.
+ *   - 96+: zero adaptation. Natural native speech IS the target;
+ *     for a learner this good it contains all the stretch they need.
+ *
+ * Picks the per-language ranges table based on targetLanguage so the
+ * examples and grammar references match what the learner is studying.
  */
 export function describeLevelForPrompt(
   level: number,
   targetLanguage: TargetLanguageSpec,
 ): string {
   const r = getLevelRange(level, targetLanguage);
+
+  if (level >= 96) {
+    return [
+      `Learner level: ${level}/100 (CEFR ${r.cefr}) — effectively native-level comprehension.`,
+      `Speak exactly as you would with a native speaker: natural vocabulary, idioms, pace, and register. Do not simplify anything — and do not artificially reach for rare or "advanced" words to match the level either. Just talk the way you actually talk.`,
+    ].join("\n");
+  }
+
+  if (level >= 86) {
+    return [
+      `Learner level: ${level}/100 (CEFR ${r.cefr}, "${r.short}").`,
+      `Speak naturally, as you would with a native speaker. The only concession: avoid the most obscure literary or heavily specialised registers unless the learner goes there first. Never inject rare words just to "match" this high level — natural speech is the goal, not performed complexity.`,
+      "",
+      lengthDirectiveForLevel(level),
+    ].join("\n");
+  }
+
   const targetCeiling = Math.min(100, r.max + 5);
+  const boundLine =
+    level <= 50
+      ? `Aim slightly above this level — stretch the learner while staying understandable. Stay within ~${targetCeiling} on the 100-point scale.`
+      : `Treat ~${targetCeiling} on the 100-point scale as a CEILING, not a target: speak naturally within it, and never reach for harder vocabulary or constructions just to match the learner's level. If natural phrasing lands below the ceiling, that is perfect.`;
+
   return [
     `Learner level: ${level}/100. Range ${r.min}-${r.max} (CEFR ${r.cefr}, "${r.short}").`,
     r.description,
     `Examples at this level: ${r.examples.map((e) => `"${e}"`).join("; ")}.`,
-    `Aim slightly above this level — stretch the learner while staying understandable. Stay within ~${targetCeiling} on the 100-point scale.`,
+    boundLine,
     "",
     lengthDirectiveForLevel(level),
   ].join("\n");
