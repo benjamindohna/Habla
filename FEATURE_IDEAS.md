@@ -339,3 +339,33 @@ Sprechen und Schreiben sind getrennte Fertigkeiten (Aussprache vs. Rechtschreibu
 - Zählt ein Re-Correct (editierte Interpretation) als eigener Input?
 - Streak-Logik: harte Tagesgrenze oder rollierendes 7-Tage-Fenster?
 - Wie aggressiv nudgen, wenn ein Modus vernachlässigt wird?
+
+---
+
+## 12. Lern-Handbuch: Empfehlung, wie man Input + Segmentation nutzt
+
+**What it is**
+
+Eine klare, kurze Anleitung ("Handbuch"), wie der User mit dem Kern-Loop arbeiten soll — einmal prominent im Onboarding-Briefing, und dauerhaft erreichbar (Menüpunkt / Info-Icon). Inhalt (Stand Aug 2026, kann sich noch ändern):
+
+Nachdem der Input gegeben wurde und die Segmentation bereit ist:
+
+1. Die Local-Version konzentriert durchlesen — und sich idealerweise per TTS-Button vorlesen lassen.
+2. Dann selbst LAUT vorlesen (bestmöglich), mindestens aber leise mit den Lippen nachsprechen.
+3. Dabei möglichst flüssig sprechen und sich die Situation vorstellen, als würde man die Wörter schon kennen und nur abrufen — nicht "ablesen", sondern simuliertes eigenes Sprechen.
+4. Bei neuen Wörtern: sich die Bedeutung bildlich vorstellen und bewusst eine Verknüpfung bauen zwischen der Vorstellung und dem Sprechen/Klang des Wortes.
+
+**Why it's interesting**
+
+Der Korrektur-Loop liefert perfekten Input, aber was der User damit *tut*, entscheidet über den Lerneffekt. Lautes Nachsprechen mit Abruf-Simulation (retrieval practice) und Bild-Klang-Verknüpfung (dual coding) sind genau die Schritte, die aus "Korrektur gelesen" echtes Sprechen-Können machen. Ohne Anleitung überspringen User das und klicken einfach Done.
+
+**Rough sketch**
+
+- Onboarding: eine Briefing-Karte/Seite mit den 4 Schritten (knappe, freundliche Sprache, evtl. Mini-Illustration pro Schritt).
+- Dauerhaft: Info-Icon am Correction-Block oder Menüpunkt "So lernst du am besten" mit demselben Inhalt.
+- Später evtl. sanfte Verhaltens-Nudges (z.B. Done-Button erst nach TTS-Play hervorheben) — aber erst Text-Version shippen.
+
+**Open questions**
+
+- Wo genau im Onboarding (hängt am ONBOARDING_PLAN)?
+- Nudge-Stärke: reine Empfehlung vs. UI-Verstärkung (z.B. Reihenfolge der Buttons)?
