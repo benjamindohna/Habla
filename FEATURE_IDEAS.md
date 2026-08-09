@@ -312,3 +312,30 @@ The new explain pipeline (word + word_class only, no context, no hint) keeps car
 - When the basic translation changes (e.g. a regen via reExplainAll), should the cached further-explanation be invalidated? Probably yes — set the cache columns to null on translation update.
 - Should this also work in the new themes-mode chat cards? Same row in `user_vocab` either way, so yes automatically.
 - Audio for the example sentences? Out of v1 scope.
+
+---
+
+## 11. Voice/Text-Balance über Tagesziele (Modus-Quoten)
+
+**What it is**
+
+Seit dem Text-Input-Modus (WhatsApp-artige Eingabeleiste, Aug 2026) kann der User pro Input frei zwischen Sprechen und Tippen wählen. Risiko: User priorisieren dauerhaft einen Modus und vernachlässigen den anderen. Gegenmittel: Tagesziele mit Mindestanteilen pro Modus.
+
+- Onboarding-Frage: "Wie viel willst du dich auf Sprechen vs. Schreiben fokussieren?" — mit Empfehlung (z.B. anfangs 60/40 pro Sprechen, später 40/60), User kann abweichen.
+- Tagesziel = Gesamtzahl Inputs UND Mindestanzahl je Modus. Überschuss in einem Modus kompensiert NICHT das Defizit im anderen: Beispiel-Ziel 10 Inputs (6 Voice / 4 Text); wer 14 Voice und 0 Text gemacht hat, muss trotzdem noch 4 Text-Inputs machen (Gesamt dann 18), um das Tagesziel zu erfüllen.
+
+**Why it's interesting**
+
+Sprechen und Schreiben sind getrennte Fertigkeiten (Aussprache vs. Rechtschreibung/Akzente; spontaner Abruf vs. überlegtes Formulieren). Voice bleibt das Prioritäts-Feature der App — die Quote schützt genau das, ohne den bequemeren Text-Modus zu verbieten. Verwandt: Aussprache-Feedback ist ein eigenes, noch gar nicht begonnenes Feld — hier nur benannt, damit die Kategorie nicht verloren geht.
+
+**Rough sketch**
+
+- users-Spalten oder eigene Tabelle für Zielkonfiguration (voice_share, daily_target) + Tages-Counter je Modus (der Input-Kanal muss dafür am Message/Correct-Call mitgeloggt werden, z.B. `input_mode: 'voice' | 'text'`).
+- UI: Fortschrittsring/Balken pro Modus im Header oder Lernen-Tab.
+- Passt konzeptionell zum Motivation-Dashboard (`MOTIVATION_DASHBOARD.md`) und zu den Themes-Zielen (`THEMES_PLAN.md`) — bei Bau dort andocken.
+
+**Open questions**
+
+- Zählt ein Re-Correct (editierte Interpretation) als eigener Input?
+- Streak-Logik: harte Tagesgrenze oder rollierendes 7-Tage-Fenster?
+- Wie aggressiv nudgen, wenn ein Modus vernachlässigt wird?

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import AudioRecorder from "./AudioRecorder";
+import ChatInputBar from "./ChatInputBar";
 import AIBubble from "./AIBubble";
 import UserBubble from "./UserBubble";
 import SealedUserBubble from "./SealedUserBubble";
@@ -354,7 +354,24 @@ export default function ConversationView({
     try {
       setPending({ stage: "processing", step: "Transcribing audio…" });
       const transcript = await transcribeAudio(blob, nativeLanguage);
+      await runInput(transcript);
+    } catch (err) {
+      setPending({ stage: "error", message: (err as Error).message });
+    }
+  }
 
+  // Text mode: the typed string IS the transcript — no ASR step. Same
+  // correction pipeline downstream (typos and mixed-language input need
+  // interpret/localize/segment exactly like spoken input does).
+  async function handleTextSubmit(text: string) {
+    try {
+      await runInput(text);
+    } catch (err) {
+      setPending({ stage: "error", message: (err as Error).message });
+    }
+  }
+
+  async function runInput(transcript: string) {
       // Playground model-mix runs stay on the buffered endpoint (the
       // stream route has no bench overrides). Normal chats stream.
       if (modelMix && (modelMix.interpret || modelMix.localize || modelMix.segment)) {
@@ -406,9 +423,6 @@ export default function ConversationView({
         setMessages((prev) => prev.filter((m) => m.id !== pendingId));
         throw err;
       }
-    } catch (err) {
-      setPending({ stage: "error", message: (err as Error).message });
-    }
   }
 
   async function handleReCorrect(messageId: string, override: string) {
@@ -556,7 +570,7 @@ export default function ConversationView({
                 {greeting}
               </h1>
               <p className="mt-3 text-sm text-neutral-400 text-center">
-                Sprich einfach drauflos oder wähle ein Thema.
+                Sprich oder schreib einfach drauflos — oder wähle ein Thema.
               </p>
             </div>
           )}
@@ -628,11 +642,14 @@ export default function ConversationView({
       {/* Recorder + (when empty) topic-button → compact bubble picker */}
       <div className="border-t border-neutral-200 bg-white">
         <div className="w-full max-w-3xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-center gap-3">
-            <AudioRecorder
-              onRecordingComplete={handleRecordingComplete}
-              disabled={isProcessing || pickingTopic !== null}
-            />
+          <div className="flex items-end justify-center gap-2">
+            <div className="flex-1 max-w-xl">
+              <ChatInputBar
+                onSubmitText={handleTextSubmit}
+                onRecordingComplete={handleRecordingComplete}
+                disabled={isProcessing || pickingTopic !== null}
+              />
+            </div>
             {isEmpty && (
               <div className="relative">
                 <button

@@ -7,7 +7,7 @@
 // explanation), exactly like in the chat correction flow.
 
 import { useState } from "react";
-import AudioRecorder from "@/components/AudioRecorder";
+import ChatInputBar from "@/components/ChatInputBar";
 import CorrectionBlock from "@/components/CorrectionBlock";
 import InterpretationLine from "@/components/InterpretationLine";
 import { useMe } from "@/components/MeProvider";
@@ -40,24 +40,38 @@ export default function FreeInputPage() {
     try {
       setStage({ kind: "transcribing" });
       const transcript = await transcribeAudio(blob, me.nativeLanguage);
-      setStage({ kind: "correcting", transcript, interpretation: null, localized: "" });
-      const result = await correctTranscriptStream(
-        {
-          transcript,
-          nativeLanguage: me.nativeLanguage,
-          style: me.correctionStyle,
-        },
-        {
-          onInterpretation: (t) =>
-            setStage((s) => (s.kind === "correcting" ? { ...s, interpretation: t } : s)),
-          onLocalizeDelta: (delta) =>
-            setStage((s) => (s.kind === "correcting" ? { ...s, localized: s.localized + delta } : s)),
-        },
-      );
-      setStage({ kind: "ready", result });
+      await runInput(transcript);
     } catch (err) {
       setStage({ kind: "error", message: (err as Error).message });
     }
+  }
+
+  // Text mode: typed input skips ASR and goes straight into the same
+  // streaming correction pipeline.
+  async function handleTextSubmit(text: string) {
+    try {
+      await runInput(text);
+    } catch (err) {
+      setStage({ kind: "error", message: (err as Error).message });
+    }
+  }
+
+  async function runInput(transcript: string) {
+    setStage({ kind: "correcting", transcript, interpretation: null, localized: "" });
+    const result = await correctTranscriptStream(
+      {
+        transcript,
+        nativeLanguage: me.nativeLanguage,
+        style: me.correctionStyle,
+      },
+      {
+        onInterpretation: (t) =>
+          setStage((s) => (s.kind === "correcting" ? { ...s, interpretation: t } : s)),
+        onLocalizeDelta: (delta) =>
+          setStage((s) => (s.kind === "correcting" ? { ...s, localized: s.localized + delta } : s)),
+      },
+    );
+    setStage({ kind: "ready", result });
   }
 
   // Re-run correction with the user's edited interpretation. Reuses the
@@ -99,7 +113,7 @@ export default function FreeInputPage() {
           Frei sprechen
         </h1>
         <p className="text-sm text-neutral-500 text-center mb-8">
-          Sprich einen Satz ein — bekomme sofort die korrekte Version mit Erklärung.
+          Sprich oder tippe einen Satz — bekomme sofort die korrekte Version mit Erklärung.
         </p>
 
         {stage.kind === "ready" && stage.result && (
@@ -148,11 +162,14 @@ export default function FreeInputPage() {
         )}
 
         <div className="flex flex-col items-center gap-3">
-          <AudioRecorder
-            onRecordingComplete={handleRecordingComplete}
-            onRecordingStart={resetForNext}
-            disabled={isProcessing}
-          />
+          <div className="w-full max-w-xl">
+            <ChatInputBar
+              onSubmitText={handleTextSubmit}
+              onRecordingComplete={handleRecordingComplete}
+              onRecordingStart={resetForNext}
+              disabled={isProcessing}
+            />
+          </div>
           {stage.kind === "ready" && stage.result && (
             <button
               onClick={resetForNext}
