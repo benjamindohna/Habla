@@ -82,6 +82,15 @@ interface AIBubbleProps {
    *  TTS preload and annotation prefetch until the text is final —
    *  otherwise every token delta would refire both effects. */
   streaming?: boolean;
+  /** "chat" (default): bubble styling inside a chat column.
+   *  "article": plain full-width paragraph for the reading mode — no
+   *  bubble chrome, larger serif-ish reading size. Tap-to-translate,
+   *  annotation prefetch, and vocab saves work identically. */
+  variant?: "chat" | "article";
+  /** Skip the per-bubble TTS preload + speaker button. The reading
+   *  page renders one play control for the WHOLE story instead of one
+   *  per paragraph. */
+  disableTts?: boolean;
 }
 
 export default function AIBubble({
@@ -91,6 +100,8 @@ export default function AIBubble({
   disableSave = false,
   autoPlay = false,
   streaming = false,
+  variant = "chat",
+  disableTts = false,
 }: AIBubbleProps) {
   const [open, setOpen] = useState<OpenState | null>(null);
   const [lookups, setLookups] = useState<Map<number, LookupState>>(new Map());
@@ -131,7 +142,7 @@ export default function AIBubble({
   // Preload TTS as soon as text is available. Auto-play once when the
   // blob lands if autoPlay was true at that moment.
   useEffect(() => {
-    if (!text || muted || loading || streaming) return;
+    if (!text || muted || loading || streaming || disableTts) return;
     autoPlayedRef.current = false;
     setTtsBlob(null);
     setTtsLoading(true);
@@ -342,17 +353,20 @@ export default function AIBubble({
 
   // ── Render ────────────────────────────────────────────────────────────
 
-  const baseClasses = muted
+  const isArticle = variant === "article";
+  const baseClasses = isArticle
+    ? "w-full text-lg leading-loose text-neutral-900"
+    : muted
     ? "max-w-[80%] rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 px-4 py-3 text-sm italic text-neutral-400"
     : "max-w-[80%] rounded-2xl bg-neutral-100 px-4 py-3 text-base leading-relaxed text-neutral-900";
 
   const tokens = !loading && text ? tokenize(text) : null;
 
-  const showSpeakControls = !loading && !muted && text;
+  const showSpeakControls = !loading && !muted && text && !disableTts;
 
   return (
-    <div className="flex justify-start">
-      <div className="flex flex-col items-start max-w-[80%]">
+    <div className={isArticle ? "w-full" : "flex justify-start"}>
+      <div className={isArticle ? "w-full" : "flex flex-col items-start max-w-[80%]"}>
         <div className={baseClasses}>
           {loading ? (
             <PulsingDots />

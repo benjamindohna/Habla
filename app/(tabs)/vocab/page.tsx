@@ -39,6 +39,15 @@ export default function VocabMenuPage() {
             Vokabel im eigenen Satz benutzen
           </span>
         </Link>
+        <Link
+          href="/vocab/reading"
+          className="w-full px-6 py-5 rounded-2xl border border-neutral-200 bg-white text-neutral-900 text-base font-medium hover:border-neutral-400 transition-colors text-left block"
+        >
+          <span className="block">Lesen</span>
+          <span className="block mt-1 text-xs text-neutral-500 font-normal">
+            Kurze Geschichte aus deinen Vokabeln — lesen oder anhören
+          </span>
+        </Link>
       </div>
     </div>
   );
