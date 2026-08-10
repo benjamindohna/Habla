@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { WORD_REGEX } from "@/lib/wordRegex";
 
@@ -444,18 +444,52 @@ interface PortaledPopoverProps {
 const PortaledPopover = forwardRef<HTMLDivElement, PortaledPopoverProps>(
   function PortaledPopover({ anchor, tappedWord, lookup }, ref) {
     const GAP = 8;
+    const SCREEN_PADDING = 8;
+    const wordCenterX = anchor.left + anchor.width / 2;
+
+    // Viewport clamping: default is centred over the word, but a word
+    // near either screen edge would push the popover off-screen. We
+    // render invisibly at the naive position first, measure the actual
+    // width, clamp into [padding, viewport - padding], and slide the
+    // tail so it keeps pointing at the tapped word. Re-measured on
+    // every content change (loading → result changes the width).
+    const innerRef = useRef<HTMLDivElement | null>(null);
+    const [clamp, setClamp] = useState<{ left: number; tailLeft: number } | null>(null);
+
+    useLayoutEffect(() => {
+      const el = innerRef.current;
+      if (!el) return;
+      const width = el.offsetWidth;
+      const viewportWidth = window.innerWidth;
+      let left = wordCenterX - width / 2;
+      const maxLeft = viewportWidth - width - SCREEN_PADDING;
+      if (left > maxLeft) left = maxLeft;
+      if (left < SCREEN_PADDING) left = SCREEN_PADDING;
+      // Tail follows the word centre, but stays inside the rounded
+      // corners of the bubble (10px margin either side).
+      const tailLeft = Math.max(10, Math.min(width - 10, wordCenterX - left));
+      setClamp({ left, tailLeft });
+    }, [wordCenterX, lookup]);
+
     // Anchor the popover ABOVE the word using `bottom`. position: fixed
-    // escapes the messages container's overflow-y-auto clipping.
+    // escapes the messages container's overflow-y-auto clipping. Until
+    // the first measurement lands, keep it invisible at the naive spot
+    // so there's no flash of an off-screen or jumping bubble.
     const style: React.CSSProperties = {
       position: "fixed",
       bottom: window.innerHeight - anchor.top + GAP,
-      left: anchor.left + anchor.width / 2,
-      transform: "translateX(-50%)",
+      left: clamp ? clamp.left : wordCenterX,
+      transform: clamp ? undefined : "translateX(-50%)",
+      visibility: clamp ? "visible" : "hidden",
       zIndex: 50,
     };
     return (
       <div
-        ref={ref}
+        ref={(node) => {
+          innerRef.current = node;
+          if (typeof ref === "function") ref(node);
+          else if (ref) ref.current = node;
+        }}
         role="tooltip"
         style={style}
         className="rounded-lg bg-neutral-900 text-white text-xs px-3 py-2 shadow-md min-w-[140px] max-w-[280px]"
@@ -472,7 +506,8 @@ const PortaledPopover = forwardRef<HTMLDivElement, PortaledPopoverProps>(
         )}
         <span
           aria-hidden="true"
-          className="absolute left-1/2 -translate-x-1/2 top-full -mt-px w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-neutral-900"
+          className="absolute top-full -mt-px w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-neutral-900"
+          style={{ left: clamp ? clamp.tailLeft : "50%", transform: "translateX(-50%)" }}
         />
       </div>
     );
