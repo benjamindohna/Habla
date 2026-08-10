@@ -11,6 +11,7 @@ import {
 import { pushRecentInput, runLevelCheckIfDue } from "@/lib/levelTracker";
 import { autoSaveUnknownVocab } from "@/lib/extractUnknownVocab";
 import { warmAnnotation } from "@/lib/annotate";
+import { runInBackground } from "@/lib/background";
 import type { CorrectionResult } from "@/types/correction";
 
 /**
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
     const override = body.overrideIntendedMeaning?.trim();
 
     await pushRecentInput(session.userId, transcript);
-    void runLevelCheckIfDue(session.userId);
+    runInBackground(runLevelCheckIfDue(session.userId), "level/check");
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
@@ -126,14 +127,17 @@ export async function POST(req: NextRequest) {
             `[timing] correct/stream interpret=${tInterpret}ms localize=${tLocalize}ms segment=${tSegment}ms total=${Date.now() - t0}ms`,
           );
 
-          void autoSaveUnknownVocab({
-            userId: session.userId,
-            transcript,
-            interpretation: interpretation.intended_meaning_native,
-            localVersionTarget: local_version_target,
-            nativeLanguage,
-            targetLanguage: user.targetLanguage,
-          });
+          runInBackground(
+            autoSaveUnknownVocab({
+              userId: session.userId,
+              transcript,
+              interpretation: interpretation.intended_meaning_native,
+              localVersionTarget: local_version_target,
+              nativeLanguage,
+              targetLanguage: user.targetLanguage,
+            }),
+            "extract-unknown-vocab",
+          );
         } catch (err) {
           console.error("[/api/correct/stream]", err);
           send({ type: "error", message: (err as Error).message });

@@ -9,6 +9,7 @@ import {
   type CorrectionStyle,
 } from "@/lib/correctionPipeline";
 import { getBenchModel } from "@/lib/llm";
+import { runInBackground } from "@/lib/background";
 import { pushRecentInput, runLevelCheckIfDue } from "@/lib/levelTracker";
 import { autoSaveUnknownVocab } from "@/lib/extractUnknownVocab";
 import type { CorrectionResult } from "@/types/correction";
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
   // FIFO ring of last 5 inputs, then fire-and-forget the cadence check
   // (no-op unless 5 inputs are present and >24h since last check).
   await pushRecentInput(session.userId, transcript);
-  void runLevelCheckIfDue(session.userId);
+  runInBackground(runLevelCheckIfDue(session.userId), "level/check");
   const style: CorrectionStyle = body.style === "transcript_aware" ? "transcript_aware" : "natural";
   const override = body.overrideIntendedMeaning?.trim();
 
@@ -117,14 +118,17 @@ export async function POST(req: NextRequest) {
     // doesn't know yet and queue each one through the standard save
     // pipeline (which dedups against existing rows). Never blocks the
     // correction response; failures stay in the server log.
-    void autoSaveUnknownVocab({
-      userId: session.userId,
-      transcript,
-      interpretation: interpretation.intended_meaning_native,
-      localVersionTarget: local_version_target,
-      nativeLanguage,
-      targetLanguage: user.targetLanguage,
-    });
+    runInBackground(
+      autoSaveUnknownVocab({
+        userId: session.userId,
+        transcript,
+        interpretation: interpretation.intended_meaning_native,
+        localVersionTarget: local_version_target,
+        nativeLanguage,
+        targetLanguage: user.targetLanguage,
+      }),
+      "extract-unknown-vocab",
+    );
 
     return NextResponse.json(result);
   } catch (err) {

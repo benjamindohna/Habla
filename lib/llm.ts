@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { runInBackground } from "./background";
 import { getUsageContext } from "./usageContext";
 import { estimateCostUsd } from "./llmPricing";
 
@@ -301,7 +302,7 @@ function logUsage(label: string, model: string, usage: Usage | undefined): void 
     promptTokens: promptTokens ?? undefined,
     completionTokens: completionTokens ?? undefined,
   });
-  void persistUsageRow({
+  runInBackground(persistUsageRow({
     userId: ctx?.userId ?? null,
     label,
     model,
@@ -311,7 +312,7 @@ function logUsage(label: string, model: string, usage: Usage | undefined): void 
     reasoningTokens: reasoning ?? null,
     costUsd,
     route: ctx?.route ?? null,
-  });
+  }), "llm-usage");
 }
 
 /**
@@ -351,7 +352,7 @@ export function logAudioUsage(
     inputBytes: signals.inputBytes,
     outputBytes: signals.outputBytes,
   });
-  void persistUsageRow({
+  runInBackground(persistUsageRow({
     userId: ctx?.userId ?? null,
     label,
     model,
@@ -361,7 +362,7 @@ export function logAudioUsage(
     outputBytes: signals.outputBytes ?? null,
     costUsd,
     route: ctx?.route ?? null,
-  });
+  }), "llm-usage");
 }
 
 /** Strip markdown fences / pre- and post-amble around a JSON object.

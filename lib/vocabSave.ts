@@ -36,6 +36,7 @@ import { classifyVocab, type WordClass } from "./vocabClassify";
 import { rerankAfterInsert } from "./vocabRanking";
 import type { TargetLanguageSpec } from "./targetLanguage";
 import { generateExplanation } from "./vocabExplain";
+import { runInBackground } from "./background";
 import { generateTts } from "./vocabTts";
 
 export interface SaveVocabArgs {
@@ -134,6 +135,9 @@ export async function saveVocabEntry(args: SaveVocabArgs): Promise<SaveVocabResu
  * endpoint returns immediately; assets fill in shortly after. Failures
  * are logged but never propagated — the row exists either way, and
  * the explain/tts endpoints regenerate missing assets on demand.
+ * Registered via runInBackground so Vercel keeps the instance alive
+ * until the assets land (plain `void` was killed at response freeze —
+ * prod rows ended up without translation/TTS).
  */
 function generateAssetsAsync(
   rowId: number,
@@ -143,7 +147,7 @@ function generateAssetsAsync(
   targetLanguage: TargetLanguageSpec,
   nativeLanguage: string,
 ): void {
-  void Promise.allSettled([
+  runInBackground(Promise.allSettled([
     generateExplanation({
       target_word: targetWord,
       word_class: wordClass,
@@ -167,7 +171,7 @@ function generateAssetsAsync(
         console.warn("[vocab/assets] generation failed:", r.reason);
       }
     }
-  });
+  }), "vocab/assets");
 }
 
 /**

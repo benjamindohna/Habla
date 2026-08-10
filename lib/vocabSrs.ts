@@ -45,12 +45,24 @@ function stageColumnExpr(mode: VocabMode) {
 }
 
 /**
- * Returns the user's due cards for the given mode, most fragile first.
+ * Returns the user's due cards for the given mode as a MIXED queue.
  * "Due" means now >= last_seen + STAGE_INTERVALS_SECONDS[stage_for_mode].
  *
+ * Why mixed: with a large due backlog, a pure oldest-first order
+ * starves fresh vocab — words saved from yesterday's conversation sat
+ * behind 50+ stale cards and never surfaced (observed in prod with 82
+ * due stage-0 cards). But the freshest words are the hottest learning
+ * material: the user still remembers the context they came from.
+ *
+ * So the queue reserves half its slots for the most recently CREATED
+ * due cards (fresh first) and fills the rest with the oldest-due
+ * backlog (most fragile first). Fresh cards lead the deck; the backlog
+ * still drains every session.
+ *
  * The CASE expression keeps the per-stage interval lookup inside SQL —
- * single round-trip, no JS-side filtering. If STAGE_INTERVALS_SECONDS
- * grows, regenerate the CASE block here in lockstep.
+ * single round-trip per half, no JS-side filtering. If
+ * STAGE_INTERVALS_SECONDS grows, regenerate the CASE block here in
+ * lockstep.
  */
 export async function getDueVocabQueue(
   userId: number,
@@ -69,27 +81,41 @@ export async function getDueVocabQueue(
     .join(" ");
   const fallback = STAGE_INTERVALS_SECONDS[MAX_STAGE];
   const intervalExpr = sql`CASE ${stageCol} ${sql.raw(caseBody)} ELSE ${sql.raw(String(fallback))} END`;
-  const rows = await db
-    .select({
-      id: userVocab.id,
-      target_word_original: userVocab.targetWordOriginal,
-      english_description: userVocab.englishDescription,
-      word_class: userVocab.wordClass,
-      stage: stageCol,
-      last_seen: userVocab.lastSeen,
-      native_translation: userVocab.nativeTranslation,
-      native_hint: userVocab.nativeHint,
-    })
+
+  const selection = {
+    id: userVocab.id,
+    target_word_original: userVocab.targetWordOriginal,
+    english_description: userVocab.englishDescription,
+    word_class: userVocab.wordClass,
+    stage: stageCol,
+    last_seen: userVocab.lastSeen,
+    native_translation: userVocab.nativeTranslation,
+    native_hint: userVocab.nativeHint,
+  };
+  const dueFilter = and(
+    eq(userVocab.userId, userId),
+    sql`${userVocab.lastSeen} + (${intervalExpr}) <= ${now}`,
+  );
+
+  const freshLimit = Math.ceil(limit / 2);
+  const fresh = await db
+    .select(selection)
     .from(userVocab)
-    .where(
-      and(
-        eq(userVocab.userId, userId),
-        sql`${userVocab.lastSeen} + (${intervalExpr}) <= ${now}`,
-      ),
-    )
-    .orderBy(stageCol, userVocab.lastSeen)
-    .limit(limit);
-  return rows as DueVocabRow[];
+    .where(dueFilter)
+    .orderBy(sql`${userVocab.createdAt} DESC`)
+    .limit(freshLimit);
+
+  const freshIds = new Set(fresh.map((r) => r.id));
+  const backlog = (
+    await db
+      .select(selection)
+      .from(userVocab)
+      .where(dueFilter)
+      .orderBy(stageCol, userVocab.lastSeen)
+      .limit(limit)
+  ).filter((r) => !freshIds.has(r.id));
+
+  return [...fresh, ...backlog].slice(0, limit) as DueVocabRow[];
 }
 
 /**
