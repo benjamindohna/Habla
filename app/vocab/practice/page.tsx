@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import VocabCardStack, { type VocabCardData } from "@/components/VocabCardStack";
 import {
@@ -83,10 +83,48 @@ export default function VocabPracticePage() {
       setCards(next);
       setExplanation(null);
       setStage(next.length > 0 ? "ready" : "empty");
+      prefetchMissingBacks(next);
     } catch (err) {
       setErrorMessage((err as Error).message);
       setStage("error");
     }
+  }
+
+  // Backs are normally pre-generated at save time; rows that slipped
+  // through (saved before the waitUntil fix, or a failed background
+  // job) would show "Antwort wird geladen…" on first flip. Prefetch
+  // those in queue order as soon as the batch lands — by the time the
+  // user reaches the card, its back is already in state. The explain
+  // endpoint caches server-side, so this also heals the row for good.
+  const prefetchGenRef = useRef(0);
+  function prefetchMissingBacks(batch: ServerCard[]) {
+    const generation = ++prefetchGenRef.current;
+    const missing = batch.filter((c) => !c.native_translation);
+    if (missing.length === 0) return;
+    void (async () => {
+      for (const card of missing) {
+        if (generation !== prefetchGenRef.current) return;
+        try {
+          const res = await fetch("/api/vocab/explain", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rowId: card.id }),
+          });
+          if (!res.ok) continue;
+          const data = (await res.json()) as Explanation;
+          if (generation !== prefetchGenRef.current) return;
+          setCards((cs) =>
+            cs.map((c) =>
+              c.id === card.id
+                ? { ...c, native_translation: data.translation, native_hint: data.hint ?? null }
+                : c,
+            ),
+          );
+        } catch {
+          // Flip-time fallback still works; skip silently.
+        }
+      }
+    })();
   }
 
   useEffect(() => {
