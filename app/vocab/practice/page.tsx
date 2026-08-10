@@ -9,7 +9,18 @@ import {
   projectNextStage,
 } from "@/lib/vocabSrsConstants";
 
-type Stage = "loading" | "ready" | "revealed" | "exiting" | "empty" | "error";
+type Stage = "loading" | "ready" | "revealed" | "exiting" | "batchdone" | "empty" | "error";
+
+/** Study angles over the queue. "due" = SRS default; the rest let the
+ *  user pick WHAT to practice (dueness ignored, commits still count). */
+type QueueSort = "due" | "recent" | "important" | "wrong";
+
+const SORT_OPTIONS: Array<{ key: QueueSort; label: string }> = [
+  { key: "due", label: "Fällig" },
+  { key: "recent", label: "Neueste" },
+  { key: "important", label: "Wichtigste" },
+  { key: "wrong", label: "Oft falsch" },
+];
 
 interface QueueResponse {
   cards: Array<{
@@ -43,45 +54,62 @@ export default function VocabPracticePage() {
   const [cards, setCards] = useState<ServerCard[]>([]);
   const [exitingId, setExitingId] = useState<number | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [sort, setSort] = useState<QueueSort>("due");
+  // Ids practiced (committed/deleted) since the last sort change. Sent
+  // as `exclude` so "Trotzdem weiterlernen" loads the NEXT batch, and
+  // used to tell "batch finished" apart from "nothing left at all".
+  const [practicedIds, setPracticedIds] = useState<number[]>([]);
+
+  async function loadBatch(activeSort: QueueSort, exclude: number[]) {
+    setStage("loading");
+    try {
+      const params = new URLSearchParams({ mode: "recognition", sort: activeSort });
+      if (exclude.length > 0) params.set("exclude", exclude.join(","));
+      const res = await fetch(`/api/vocab/queue?${params}`);
+      if (res.status === 401) {
+        router.push("/login");
+        return;
+      }
+      if (!res.ok) throw new Error(`Queue fetch failed (HTTP ${res.status})`);
+      const data = (await res.json()) as QueueResponse;
+      const next: ServerCard[] = data.cards.map((c) => ({
+        id: c.id,
+        target_word_original: c.target_word_original,
+        english_description: c.english_description,
+        stage: c.stage,
+        native_translation: c.native_translation,
+        native_hint: c.native_hint,
+      }));
+      setCards(next);
+      setExplanation(null);
+      setStage(next.length > 0 ? "ready" : "empty");
+    } catch (err) {
+      setErrorMessage((err as Error).message);
+      setStage("error");
+    }
+  }
 
   useEffect(() => {
-    let cancelled = false;
-    fetch("/api/vocab/queue?mode=recognition")
-      .then(async (res) => {
-        if (res.status === 401) {
-          router.push("/login");
-          throw new Error("Not authenticated");
-        }
-        if (!res.ok) throw new Error(`Queue fetch failed (HTTP ${res.status})`);
-        return (await res.json()) as QueueResponse;
-      })
-      .then((data) => {
-        if (cancelled) return;
-        const next: ServerCard[] = data.cards.map((c) => ({
-          id: c.id,
-          target_word_original: c.target_word_original,
-          english_description: c.english_description,
-          stage: c.stage,
-          native_translation: c.native_translation,
-          native_hint: c.native_hint,
-        }));
-        setCards(next);
-        setStage(next.length > 0 ? "ready" : "empty");
-      })
-      .catch((err: Error) => {
-        if (cancelled) return;
-        setErrorMessage(err.message);
-        setStage("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+    void loadBatch("due", []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleSortChange(next: QueueSort) {
+    if (next === sort && stage !== "empty" && stage !== "batchdone") return;
+    setSort(next);
+    setPracticedIds([]);
+    void loadBatch(next, []);
+  }
+
+  function handleContinue() {
+    void loadBatch(sort, practicedIds);
+  }
 
   const currentCard = cards[0];
 
   function dismissCurrent() {
     if (!currentCard) return;
+    setPracticedIds((ids) => [...ids, currentCard.id]);
     setExitingId(currentCard.id);
     setStage("exiting");
     setTimeout(() => {
@@ -152,10 +180,19 @@ export default function VocabPracticePage() {
   }
 
   useEffect(() => {
-    if (cards.length === 0 && stage !== "loading" && stage !== "exiting" && stage !== "empty" && stage !== "error") {
-      setStage("empty");
+    if (
+      cards.length === 0 &&
+      stage !== "loading" &&
+      stage !== "exiting" &&
+      stage !== "empty" &&
+      stage !== "batchdone" &&
+      stage !== "error"
+    ) {
+      // Batch drained by practicing (not by an empty fetch) → offer to
+      // continue instead of claiming everything is done.
+      setStage(practicedIds.length > 0 ? "batchdone" : "empty");
     }
-  }, [cards.length, stage]);
+  }, [cards.length, stage, practicedIds.length]);
 
   return (
     <main className="min-h-screen bg-neutral-50">
@@ -169,12 +206,30 @@ export default function VocabPracticePage() {
           </button>
           <h1 className="text-sm font-medium text-neutral-700">Vocab Practice</h1>
           <span className="text-xs text-neutral-400 tabular-nums">
-            {stage === "loading" ? "…" : `${cards.length} fällig`}
+            {stage === "loading" ? "…" : `${cards.length} Karten`}
           </span>
         </div>
       </header>
 
-      <div className="max-w-md mx-auto px-4 py-12">
+      <div className="max-w-md mx-auto px-4 py-8">
+        {/* Study-angle picker: what to practice, not just what's due. */}
+        <div className="flex justify-center gap-1.5 mb-8 flex-wrap">
+          {SORT_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => handleSortChange(opt.key)}
+              className={
+                "px-3 py-1.5 rounded-full text-xs font-medium transition-colors border " +
+                (sort === opt.key
+                  ? "bg-neutral-900 text-white border-neutral-900"
+                  : "bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400")
+              }
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
         {stage === "loading" && (
           <p className="text-center text-sm text-neutral-400 mt-12">Lade Karten…</p>
         )}
@@ -191,14 +246,51 @@ export default function VocabPracticePage() {
           </div>
         )}
 
+        {stage === "batchdone" && (
+          <div className="text-center mt-12 space-y-4">
+            <p className="text-3xl">✨</p>
+            <p className="text-lg font-medium text-neutral-800">
+              {practicedIds.length} Karten geübt — starke Runde!
+            </p>
+            <p className="text-sm text-neutral-500 leading-relaxed">
+              Zu viel Input auf einmal ist nicht empfohlen —<br />
+              das Gehirn festigt Vokabeln am besten in Pausen.
+            </p>
+            <div className="flex flex-col items-center gap-2 mt-4">
+              <button
+                onClick={handleContinue}
+                className="px-5 py-2 rounded-lg border border-neutral-300 text-neutral-700 text-sm hover:border-neutral-500 hover:text-neutral-900 transition-colors"
+              >
+                Trotzdem weiterlernen
+              </button>
+              <button
+                onClick={() => router.push("/")}
+                className="px-5 py-2 rounded-lg bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors"
+              >
+                Fertig für heute →
+              </button>
+            </div>
+          </div>
+        )}
+
         {stage === "empty" && (
           <div className="text-center mt-12 space-y-4">
             <p className="text-3xl">🎉</p>
-            <p className="text-lg font-medium text-neutral-800">Alles gelernt!</p>
+            <p className="text-lg font-medium text-neutral-800">
+              {sort === "due" ? "Alles gelernt!" : "Keine weiteren Karten"}
+            </p>
             <p className="text-sm text-neutral-500 leading-relaxed">
-              Du hast alle fälligen Karten durch.<br />
-              Starte einen neuen Chat, um neue Wörter zu entdecken —<br />
-              sie landen automatisch hier.
+              {sort === "due" ? (
+                <>
+                  Du hast alle fälligen Karten durch.<br />
+                  Starte einen neuen Chat, um neue Wörter zu entdecken —<br />
+                  sie landen automatisch hier.
+                </>
+              ) : sort === "wrong" ? (
+                <>In dieser Kategorie gibt es gerade nichts zu üben —<br />du hast keine (weiteren) oft-falschen Karten. Sehr gut!</>
+              ) : (
+                <>In dieser Kategorie gibt es gerade keine weiteren Karten.</>
+              )}
             </p>
             <button
               onClick={() => router.push("/")}

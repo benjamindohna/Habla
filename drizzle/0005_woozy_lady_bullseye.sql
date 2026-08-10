@@ -1,0 +1,1 @@
+ALTER TABLE "user_vocab" ADD COLUMN "wrong_count" integer DEFAULT 0 NOT NULL;

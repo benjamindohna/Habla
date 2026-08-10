@@ -44,6 +44,19 @@ function stageColumnExpr(mode: VocabMode) {
   return mode === "sentence" ? userVocab.stageSentence : userVocab.stage;
 }
 
+function selectionFor(stageCol: ReturnType<typeof stageColumnExpr>) {
+  return {
+    id: userVocab.id,
+    target_word_original: userVocab.targetWordOriginal,
+    english_description: userVocab.englishDescription,
+    word_class: userVocab.wordClass,
+    stage: stageCol,
+    last_seen: userVocab.lastSeen,
+    native_translation: userVocab.nativeTranslation,
+    native_hint: userVocab.nativeHint,
+  };
+}
+
 /**
  * Returns the user's due cards for the given mode as a MIXED queue.
  * "Due" means now >= last_seen + STAGE_INTERVALS_SECONDS[stage_for_mode].
@@ -64,10 +77,22 @@ function stageColumnExpr(mode: VocabMode) {
  * STAGE_INTERVALS_SECONDS grows, regenerate the CASE block here in
  * lockstep.
  */
+/** Queue sort modes for the practice UI. "due" is the SRS default; the
+ *  rest are user-chosen study angles over the WHOLE vocab list
+ *  (dueness ignored — free practice, SRS commits still apply):
+ *    recent    → newest saves first (created_at DESC)
+ *    important → personalised relevance ranking (relevance_rank ASC)
+ *    wrong     → most-lapsed first (wrong_count DESC, only rows > 0) */
+export type VocabQueueSort = "due" | "recent" | "important" | "wrong";
+
 export async function getDueVocabQueue(
   userId: number,
   mode: VocabMode,
   limit: number = 30,
+  sort: VocabQueueSort = "due",
+  /** Rows to skip — the client sends the ids it already practiced this
+   *  session so "Trotzdem weiterlernen" loads the NEXT batch. */
+  excludeIds: number[] = [],
 ): Promise<DueVocabRow[]> {
   const now = Math.floor(Date.now() / 1000);
   const stageCol = stageColumnExpr(mode);
@@ -82,19 +107,37 @@ export async function getDueVocabQueue(
   const fallback = STAGE_INTERVALS_SECONDS[MAX_STAGE];
   const intervalExpr = sql`CASE ${stageCol} ${sql.raw(caseBody)} ELSE ${sql.raw(String(fallback))} END`;
 
-  const selection = {
-    id: userVocab.id,
-    target_word_original: userVocab.targetWordOriginal,
-    english_description: userVocab.englishDescription,
-    word_class: userVocab.wordClass,
-    stage: stageCol,
-    last_seen: userVocab.lastSeen,
-    native_translation: userVocab.nativeTranslation,
-    native_hint: userVocab.nativeHint,
-  };
+  const selection = selectionFor(stageCol);
+  const excludeFilter =
+    excludeIds.length > 0
+      ? sql`${userVocab.id} NOT IN (${sql.join(excludeIds.map((id) => sql`${id}`), sql`, `)})`
+      : sql`TRUE`;
+
+  // Non-due sorts: one straight query over the whole list.
+  if (sort !== "due") {
+    const orderBy =
+      sort === "recent"
+        ? sql`${userVocab.createdAt} DESC`
+        : sort === "important"
+        ? sql`${userVocab.relevanceRank} ASC`
+        : sql`${userVocab.wrongCount} DESC, ${userVocab.lastSeen} ASC`;
+    const filter =
+      sort === "wrong"
+        ? and(eq(userVocab.userId, userId), sql`${userVocab.wrongCount} > 0`, excludeFilter)
+        : and(eq(userVocab.userId, userId), excludeFilter);
+    const rows = await db
+      .select(selectionFor(stageCol))
+      .from(userVocab)
+      .where(filter)
+      .orderBy(orderBy)
+      .limit(limit);
+    return rows as DueVocabRow[];
+  }
+
   const dueFilter = and(
     eq(userVocab.userId, userId),
     sql`${userVocab.lastSeen} + (${intervalExpr}) <= ${now}`,
+    excludeFilter,
   );
 
   const freshLimit = Math.ceil(limit / 2);
@@ -174,6 +217,7 @@ export async function applyJudgeResult(
       [stageKey]: sql.raw(String(newStage)),
       lastSeen: now + fuzz,
       lookedUp: sql`${userVocab.lookedUp} + 1`,
+      ...(isLapse ? { wrongCount: sql`${userVocab.wrongCount} + 1` } : {}),
     })
     .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
 }

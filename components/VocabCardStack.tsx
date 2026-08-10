@@ -31,6 +31,27 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { MAX_STAGE } from "@/lib/vocabSrsConstants";
+
+/** One dot per SRS stage (1..MAX_STAGE); dots up to the card's current
+ *  stage are filled green. Compact enough for the card's top-left. */
+function StageDots({ stage }: { stage: number }) {
+  return (
+    <span className="inline-flex items-center gap-[3px]">
+      {Array.from({ length: MAX_STAGE }, (_, i) => (
+        <span
+          key={i}
+          className={
+            "block w-[7px] h-[7px] rounded-full border " +
+            (i < stage
+              ? "bg-emerald-500 border-emerald-500"
+              : "bg-transparent border-neutral-300")
+          }
+        />
+      ))}
+    </span>
+  );
+}
 
 const VISIBLE_LAYERS = 5;
 const TRANSLATE_PER_LAYER = 6;   // px each card peeks above the one in front
@@ -259,6 +280,13 @@ export default function VocabCardStack({
                   role={!revealed && onTapFront ? "button" : undefined}
                   tabIndex={!revealed && onTapFront ? 0 : undefined}
                 >
+                  {/* Stage progress: one dot per SRS stage, filled up
+                      to the card's current stage. New card → all empty;
+                      each correct answer fills one more. */}
+                  <div className="absolute top-4 left-3.5" title={`Stage ${card.stage} von ${MAX_STAGE}`}>
+                    <StageDots stage={card.stage} />
+                  </div>
+
                   {/* TTS button. stopPropagation so tapping it doesn't
                       also fire onTapFront → no accidental reveal. */}
                   <button
@@ -275,9 +303,6 @@ export default function VocabCardStack({
                   </button>
 
                   <div className="flex flex-col items-center gap-3 px-6 py-8 w-full pointer-events-none">
-                    <p className="text-xs uppercase tracking-wider text-neutral-400">
-                      Stage {card.stage}
-                    </p>
                     <p className="text-3xl font-medium text-neutral-900 text-center break-words">
                       {card.target_word_original}
                     </p>

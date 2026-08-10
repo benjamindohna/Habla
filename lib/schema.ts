@@ -154,6 +154,11 @@ export const userVocab = pgTable(
     stageSentence: integer("stage_sentence").notNull().default(0),
     nextDueAt: integer("next_due_at"),
     correctStreak: integer("correct_streak").notNull().default(0),
+    // Lifetime count of "wrong" (judge result 0) commits across both
+    // practice modes. Drives the "Oft falsch" queue sort. Unlike the
+    // old `lapses` column (dropped in 0005 as write-only), this one has
+    // a reader from day one.
+    wrongCount: integer("wrong_count").notNull().default(0),
     lookedUp: integer("looked_up").notNull().default(1),
     lastSeen: integer("last_seen").notNull().default(nowSeconds),
     relevanceRank: integer("relevance_rank").notNull().default(999999),
