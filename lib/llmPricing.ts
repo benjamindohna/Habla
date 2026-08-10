@@ -36,6 +36,15 @@ const CHAT_PRICES: Record<string, ChatPricing> = {
   "grok-4-fast-non-reasoning": { inputPer1M: 0.2, outputPer1M: 0.5 },
   "gemini-3.1-flash-lite": { inputPer1M: 0.25, outputPer1M: 1.5 },
   "gemini-2.5-flash": { inputPer1M: 0.3, outputPer1M: 2.5 },
+  // Anthropic (verified against official pricing 2026-08): Sonnet 4.6
+  // authors the reading-mode stories, Haiku is a bench candidate.
+  "claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0 },
+  "claude-haiku-4-5": { inputPer1M: 1.0, outputPer1M: 5.0 },
+  // Bench-only OpenAI models — priced so playground runs don't create
+  // null-cost rows in llm_usage.
+  "gpt-4.1": { inputPer1M: 2.0, outputPer1M: 8.0 },
+  "gpt-4.1-mini": { inputPer1M: 0.4, outputPer1M: 1.6 },
+  "gpt-5-mini": { inputPer1M: 0.25, outputPer1M: 2.0 },
 };
 
 const AUDIO_PRICES: Record<string, AudioPricing> = {
