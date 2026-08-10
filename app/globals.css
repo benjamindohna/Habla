@@ -39,6 +39,19 @@ html {
   overflow: hidden;
 }
 
+/* Mobile Safari: 100% resolves against the LARGE viewport, so bottom-
+ * anchored UI (the tab bar) ends up behind the browser's URL bar.
+ * 100dvh tracks the actually-visible height and follows the URL bar as
+ * it expands/collapses. In the Capacitor WebView and the installed
+ * homescreen app there is no browser chrome, so 100dvh === 100% and
+ * nothing changes there. @supports keeps older engines on the 100%
+ * fallback. */
+@supports (height: 100dvh) {
+  html {
+    height: 100dvh;
+  }
+}
+
 body {
   height: 100%;
   overflow: hidden;

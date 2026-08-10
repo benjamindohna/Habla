@@ -524,7 +524,11 @@ export default function ConversationView({
   const isProcessing = pending.stage === "processing";
 
   return (
-    <main className="flex flex-col h-screen">
+    // h-full, not h-screen: when this view is nested inside the tabs
+    // layout, h-screen (100vh) overflows the flex container in mobile
+    // Safari (100vh includes the area behind the URL bar). As body>main
+    // (/chat/[id]) the globals.css override wins either way.
+    <main className="flex flex-col h-full">
       {/* Header */}
       <header className="border-b border-neutral-200 bg-white">
         <div className="w-full max-w-3xl mx-auto flex items-center justify-between gap-3 px-4 py-3">
