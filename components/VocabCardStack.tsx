@@ -77,7 +77,26 @@ export interface VocabCardData {
   id: number;
   target_word_original: string;
   stage: number;
+  /** Canonical word class from the classifier (null on legacy rows).
+   *  Shown as a subtle German label under the word — disambiguates
+   *  homographs like "echo" (Verb: ich werfe) vs "hecho" (Nomen). */
+  word_class?: string | null;
 }
+
+/** German display labels for the classifier's canonical word classes. */
+const WORD_CLASS_LABELS: Record<string, string> = {
+  noun: "Nomen",
+  verb: "Verb",
+  adjective: "Adjektiv",
+  adverb: "Adverb",
+  preposition: "Präposition",
+  conjunction: "Konjunktion",
+  pronoun: "Pronomen",
+  determiner: "Begleiter",
+  interjection: "Interjektion",
+  idiom: "Redewendung",
+  phrase: "Phrase",
+};
 
 interface Props {
   cards: VocabCardData[];
@@ -306,6 +325,11 @@ export default function VocabCardStack({
                     <p className="text-3xl font-medium text-neutral-900 text-center break-words">
                       {card.target_word_original}
                     </p>
+                    {card.word_class && WORD_CLASS_LABELS[card.word_class] && (
+                      <p className="text-xs text-neutral-400 -mt-1">
+                        {WORD_CLASS_LABELS[card.word_class]}
+                      </p>
+                    )}
                     {frontOverlay ? (
                       // re-enable pointer events for the overlay (input
                       // would be unusable inside a pointer-events-none

@@ -20,6 +20,7 @@ interface QueueResponse {
     id: number;
     target_word_original: string;
     english_description: string;
+    word_class: string | null;
     stage: number;
     last_seen: number;
     native_translation: string | null;
@@ -71,6 +72,7 @@ export default function VocabSentencePage() {
           id: c.id,
           target_word_original: c.target_word_original,
           english_description: c.english_description,
+          word_class: c.word_class,
           stage: c.stage,
           native_translation: c.native_translation,
           native_hint: c.native_hint,
