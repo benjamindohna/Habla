@@ -28,7 +28,9 @@ interface ExtractionResult {
   unknown_words: string[];
 }
 
-function buildPrompt(args: ExtractArgs): string {
+/** Exported for prompt regression tests (scripts hit it with bench
+ *  models when the prod key isn't available locally). */
+export function buildPrompt(args: ExtractArgs): string {
   const target = describeTargetLanguage(args.targetLanguage);
   return `You are a vocabulary-extraction engine for language learning.
 
@@ -53,11 +55,15 @@ A word/phrase is UNKNOWN when at least one of these is clearly true:
 
 A word/phrase is NOT unknown when:
 - The learner used it correctly in any form (even with a minor grammar/conjugation error of a clearly-known word)
-- It is a function word: preposition, article, conjunction, basic pronoun — skip these even if missing
+- It is a function word standing ALONE: preposition, article, conjunction, basic pronoun — skip these even if missing (but see GRAMMATICAL CONSTRUCTIONS below: function words that form a fixed construction are extracted as the whole unit)
 - It is a proper noun (names of people, brands, cities)
 - It is a number or trivial filler
 
-Prefer single words. Group into a short phrase only when the meaning depends on the unit (fixed expression like "tener ganas", "por ejemplo", compound verbs like "darse cuenta", contrastive conjunctions like "mientras que", verb+noun idioms like "llamar la atención"). Always use the form as it appears in the CORRECT VERSION — that's the lemma the learner needs to learn.
+SINGLE WORD vs PHRASE — decide by this test: would the unit still carry its meaning if you removed any one word? If yes → extract the single word the learner didn't know. If no → the whole unit is the vocabulary item; extract the full phrase. Phrase categories:
+- Fixed expressions ("tener ganas", "por ejemplo"), compound verbs ("darse cuenta"), contrastive conjunctions ("mientras que"), verb+noun idioms ("llamar la atención").
+- GRAMMATICAL CONSTRUCTIONS: a multi-word pattern from the CORRECT VERSION whose grammar diverges so strongly from the ${args.nativeLanguage} equivalent that a literal word-by-word translation would never produce it — nominalising frames ("el hecho de que", "lo de", "lo que"), concessives ("a pesar de que"), a-personal with clitic doubling ("A uno de ellos ya lo conozco"), se-passives, gustar-type inversion. These are built MOSTLY OF FUNCTION WORDS — that does not disqualify them; the construction as a unit is exactly what the learner needs to learn. Save the construction as spoken in the CORRECT VERSION (for clause-level patterns, the whole clause).
+
+Always use the form as it appears in the CORRECT VERSION — that's the lemma the learner needs to learn.
 
 ═════ WORKED EXAMPLES (Spanish target, German native — rules apply to any language pair) ═════
 
@@ -102,6 +108,29 @@ TRANSCRIPT:  "Tengo mucha hambre hoy."
 INTERPRETATION: "Ich habe heute großen Hunger."
 CORRECT: "Tengo mucha hambre hoy."
 unknown_words: []
+
+EXAMPLE 6 — grammatical construction, save the FULL frame not the bare noun:
+TRANSCRIPT:  "La Tatsache que puedo entrenar cada día es importante."
+INTERPRETATION: "Die Tatsache, dass ich jeden Tag trainieren kann, ist wichtig."
+CORRECT: "El hecho de que pueda entrenar cada día es importante."
+unknown_words: ["el hecho de que"]
+  ✗ NEVER "hecho" alone — as a bare noun "hecho" is just "fact/deed",
+  but the learner's gap is the nominalising FRAME "el hecho de que"
+  (+ subjunctive), which is how ${target} says "the fact that...". The
+  article and "de que" are function words, yet here they are part of
+  the unit — the construction only works as a whole.
+
+EXAMPLE 7 — structural clause, save the whole clause as spoken:
+TRANSCRIPT:  "Uno de ellos ya conozco, pero el otro no conozco."
+INTERPRETATION: "Einen von ihnen kenne ich schon, aber den anderen kenne ich nicht."
+CORRECT: "A uno de ellos ya lo conozco, pero al otro no lo conozco."
+unknown_words: ["A uno de ellos ya lo conozco"]
+  The learner knew every content word (conocer, uno, ellos) — no
+  lexical gap. But the a-personal + clitic-doubling pattern ("A uno...
+  ya LO conozco") is grammar a literal translation from
+  ${args.nativeLanguage} would never produce. Save the clause as it
+  appears; it teaches the pattern in context. One representative
+  clause is enough — don't also save the parallel second clause.
 
 ═════ OUTPUT ═════
 
