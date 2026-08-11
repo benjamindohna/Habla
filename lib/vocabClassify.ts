@@ -111,8 +111,38 @@ Return ONLY valid JSON:
   });
   const raw = (result.word_class ?? "").trim().toLowerCase();
   if ((VALID as string[]).includes(raw)) {
-    return raw as WordClass;
+    return coerceMultiWord(args.target_word, raw as WordClass);
   }
   // Safe fallback — most ambiguous "what is this" is some kind of noun.
-  return "noun";
+  return coerceMultiWord(args.target_word, "noun");
+}
+
+/** Classes that can only ever describe a SINGLE word. A multi-word
+ *  segment labeled with one of these is a classifier miss ("una carta
+ *  muy poderosa" came back as "adjective"), and that mislabel poisons
+ *  downstream: the explain prompt, told to translate the segment "in
+ *  its word class adjective", collapsed to translating just the one
+ *  word that fit the class ("muy" → "sehr"). Deterministic backstop:
+ *  coerce such combinations to "phrase". Multi-word nouns ("la
+ *  mayoría", "Estados Unidos"), verbs (compound tenses "voy a hacer"),
+ *  and idioms stay untouched. */
+const SINGLE_WORD_ONLY: ReadonlySet<WordClass> = new Set([
+  "adjective",
+  "adverb",
+  "preposition",
+  "conjunction",
+  "pronoun",
+  "determiner",
+  "interjection",
+]);
+
+function coerceMultiWord(targetWord: string, wordClass: WordClass): WordClass {
+  const wordCount = targetWord.trim().split(/\s+/).length;
+  if (wordCount > 1 && SINGLE_WORD_ONLY.has(wordClass)) {
+    // Two-word units can legitimately be adverbial/prepositional
+    // ("muy pintoresco", "sin embargo") — only coerce from 3 words up,
+    // where a single-word class is definitely wrong.
+    if (wordCount >= 3) return "phrase";
+  }
+  return wordClass;
 }

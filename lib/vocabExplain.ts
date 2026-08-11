@@ -48,12 +48,10 @@ export interface Explanation {
   translation: string;
 }
 
-/**
- * Pure async function — no auth, no DB. Throws on empty translation
- * (LLM hallucination guard).
- */
-export async function generateExplanation(args: ExplainArgs): Promise<Explanation> {
-  const prompt = `You are a vocabulary tutor. The learner is studying ${args.targetLanguage.language}; their native language is ${args.native_language}.
+/** Exported for prompt regression tests (scripts hit it with bench
+ *  models when the prod key isn't available locally). */
+export function buildExplainPrompt(args: ExplainArgs): string {
+  return `You are a vocabulary tutor. The learner is studying ${args.targetLanguage.language}; their native language is ${args.native_language}.
 
 The learner captured a ${args.targetLanguage.language} word. Produce a clean ${args.native_language} translation that lists all the common meanings of this word, in its given word class.
 
@@ -89,6 +87,18 @@ List ALL the common meanings the word carries IN ITS WORD CLASS. Use simple semi
 
 Tag each meaning with a 1-3 word disambiguator in parentheses ONLY when the meanings could otherwise be confused (e.g. "die Bank" alone is ambiguous in German).
 
+═════ MULTI-WORD SEGMENTS ═════
+
+If the captured word is a MULTI-WORD segment, translate the ENTIRE
+segment as one unit. The translation must cover every content word —
+NEVER translate just one word from inside it, even if the given word
+class seems to fit only that one word. If the word class and the
+segment disagree (e.g. a noun phrase labeled "adjective"), trust the
+SEGMENT and translate all of it; the class is only a hint.
+- "una carta muy poderosa" (phrase) → "eine sehr mächtige Karte"   NOT "sehr", NOT "mächtig"
+- "el hecho de que" (phrase) → "die Tatsache, dass"
+- "la fuerza correcta" (noun) → "die richtige Kraft"   NOT "die Kraft"
+
 Examples:
 - "piso" (noun) → "die Wohnung; das Stockwerk; der Boden"
 - "vela" (noun) → "die Kerze; das Segel"
@@ -115,7 +125,14 @@ Return ONLY valid JSON:
 {
   "translation": "<semicolon-separated meanings, form-faithful, matching the captured form's grammar>"
 }`;
+}
 
+/**
+ * Pure async function — no auth, no DB. Throws on empty translation
+ * (LLM hallucination guard).
+ */
+export async function generateExplanation(args: ExplainArgs): Promise<Explanation> {
+  const prompt = buildExplainPrompt(args);
   const result = await chatJSON<{ translation?: string }>({
     task: "chat_precise",
     label: "vocab/explain",
