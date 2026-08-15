@@ -11,15 +11,15 @@ import {
 
 type Stage = "loading" | "ready" | "revealed" | "exiting" | "batchdone" | "empty" | "error";
 
-/** Study angles over the queue. "due" = SRS default; the rest let the
- *  user pick WHAT to practice (dueness ignored, commits still count). */
-type QueueSort = "due" | "recent" | "important" | "wrong";
+/** Orderings over the DUE cards — dueness is always the filter, the
+ *  chip only picks the order. "Oft falsch" is the default: problem
+ *  cards lead, fresh saves follow, backlog drains after. */
+type QueueSort = "recent" | "important" | "wrong";
 
 const SORT_OPTIONS: Array<{ key: QueueSort; label: string }> = [
-  { key: "due", label: "Fällig" },
+  { key: "wrong", label: "Oft falsch" },
   { key: "recent", label: "Neueste" },
   { key: "important", label: "Wichtigste" },
-  { key: "wrong", label: "Oft falsch" },
 ];
 
 interface QueueResponse {
@@ -55,7 +55,7 @@ export default function VocabPracticePage() {
   const [cards, setCards] = useState<ServerCard[]>([]);
   const [exitingId, setExitingId] = useState<number | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
-  const [sort, setSort] = useState<QueueSort>("due");
+  const [sort, setSort] = useState<QueueSort>("wrong");
   // Ids practiced (committed/deleted) since the last sort change. Sent
   // as `exclude` so "Trotzdem weiterlernen" loads the NEXT batch, and
   // used to tell "batch finished" apart from "nothing left at all".
@@ -130,7 +130,7 @@ export default function VocabPracticePage() {
   }
 
   useEffect(() => {
-    void loadBatch("due", []);
+    void loadBatch("wrong", []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -316,19 +316,11 @@ export default function VocabPracticePage() {
         {stage === "empty" && (
           <div className="text-center mt-12 space-y-4">
             <p className="text-3xl">🎉</p>
-            <p className="text-lg font-medium text-neutral-800">
-              {sort === "wrong" ? "Nichts fällig in dieser Kategorie" : "Alles gelernt!"}
-            </p>
+            <p className="text-lg font-medium text-neutral-800">Alles gelernt!</p>
             <p className="text-sm text-neutral-500 leading-relaxed">
-              {sort === "wrong" ? (
-                <>Gerade ist keine deiner oft-falschen Karten fällig. Sehr gut!</>
-              ) : (
-                <>
-                  Du hast alle fälligen Karten durch.<br />
-                  Starte einen neuen Chat, um neue Wörter zu entdecken —<br />
-                  sie landen automatisch hier.
-                </>
-              )}
+              Du hast alle fälligen Karten durch.<br />
+              Starte einen neuen Chat, um neue Wörter zu entdecken —<br />
+              sie landen automatisch hier.
             </p>
             <button
               onClick={() => router.push("/")}

@@ -127,18 +127,21 @@ export async function getDueVocabQueue(
   // relevance, "recent" = due cards newest-first, "wrong" = due cards
   // most-lapsed first. "due" keeps the mixed fresh+backlog order.
   if (sort !== "due") {
+    // "wrong" is the practice DEFAULT, so it must cover ALL due cards,
+    // not just ones with lapses (a wrong_count > 0 filter would hide
+    // every never-wrong due card from the default view). Most-lapsed
+    // first; among the never-wrong majority, newest saves first so
+    // fresh conversation words keep leading the deck before backlog.
     const orderBy =
       sort === "recent"
         ? sql`${userVocab.createdAt} DESC`
         : sort === "important"
         ? sql`${userVocab.relevanceRank} ASC`
-        : sql`${userVocab.wrongCount} DESC, ${userVocab.lastSeen} ASC`;
-    const filter =
-      sort === "wrong" ? and(dueFilter, sql`${userVocab.wrongCount} > 0`) : dueFilter;
+        : sql`${userVocab.wrongCount} DESC, ${userVocab.createdAt} DESC`;
     const rows = await db
       .select(selection)
       .from(userVocab)
-      .where(filter)
+      .where(dueFilter)
       .orderBy(orderBy)
       .limit(limit);
     return rows as DueVocabRow[];
