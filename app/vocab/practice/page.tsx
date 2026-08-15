@@ -317,19 +317,17 @@ export default function VocabPracticePage() {
           <div className="text-center mt-12 space-y-4">
             <p className="text-3xl">🎉</p>
             <p className="text-lg font-medium text-neutral-800">
-              {sort === "due" ? "Alles gelernt!" : "Keine weiteren Karten"}
+              {sort === "wrong" ? "Nichts fällig in dieser Kategorie" : "Alles gelernt!"}
             </p>
             <p className="text-sm text-neutral-500 leading-relaxed">
-              {sort === "due" ? (
+              {sort === "wrong" ? (
+                <>Gerade ist keine deiner oft-falschen Karten fällig. Sehr gut!</>
+              ) : (
                 <>
                   Du hast alle fälligen Karten durch.<br />
                   Starte einen neuen Chat, um neue Wörter zu entdecken —<br />
                   sie landen automatisch hier.
                 </>
-              ) : sort === "wrong" ? (
-                <>In dieser Kategorie gibt es gerade nichts zu üben —<br />du hast keine (weiteren) oft-falschen Karten. Sehr gut!</>
-              ) : (
-                <>In dieser Kategorie gibt es gerade keine weiteren Karten.</>
               )}
             </p>
             <button

@@ -113,7 +113,19 @@ export async function getDueVocabQueue(
       ? sql`${userVocab.id} NOT IN (${sql.join(excludeIds.map((id) => sql`${id}`), sql`, `)})`
       : sql`TRUE`;
 
-  // Non-due sorts: one straight query over the whole list.
+  const dueFilter = and(
+    eq(userVocab.userId, userId),
+    sql`${userVocab.lastSeen} + (${intervalExpr}) <= ${now}`,
+    excludeFilter,
+  );
+
+  // DUENESS IS ALWAYS THE FILTER; the sort only chooses the ORDER of
+  // the due cards. Earlier the non-due sorts ran over the whole list,
+  // which resurfaced cards answered correctly yesterday — the same
+  // deck in the same order every day, and every commit on a not-yet-
+  // due card churned its SRS intervals. Now "important" = due cards by
+  // relevance, "recent" = due cards newest-first, "wrong" = due cards
+  // most-lapsed first. "due" keeps the mixed fresh+backlog order.
   if (sort !== "due") {
     const orderBy =
       sort === "recent"
@@ -122,23 +134,15 @@ export async function getDueVocabQueue(
         ? sql`${userVocab.relevanceRank} ASC`
         : sql`${userVocab.wrongCount} DESC, ${userVocab.lastSeen} ASC`;
     const filter =
-      sort === "wrong"
-        ? and(eq(userVocab.userId, userId), sql`${userVocab.wrongCount} > 0`, excludeFilter)
-        : and(eq(userVocab.userId, userId), excludeFilter);
+      sort === "wrong" ? and(dueFilter, sql`${userVocab.wrongCount} > 0`) : dueFilter;
     const rows = await db
-      .select(selectionFor(stageCol))
+      .select(selection)
       .from(userVocab)
       .where(filter)
       .orderBy(orderBy)
       .limit(limit);
     return rows as DueVocabRow[];
   }
-
-  const dueFilter = and(
-    eq(userVocab.userId, userId),
-    sql`${userVocab.lastSeen} + (${intervalExpr}) <= ${now}`,
-    excludeFilter,
-  );
 
   const freshLimit = Math.ceil(limit / 2);
   const fresh = await db
