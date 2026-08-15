@@ -391,3 +391,53 @@ Ergänzt die Ceiling-Umstellung in `describeLevelForPrompt` (Level limitiert nur
 - Schwierigkeits-Skala fürs Thema: gleiche 1-100-Skala wie das User-Level?
 - Wann user_vocab-Abdeckung statt LLM-Schätzung (braucht themen-typische Wortlisten)?
 - Andockpunkt: eigenständig bauen oder direkt im THEMES_PLAN (Themes haben ohnehin Level + gegatetes Vokabular)?
+
+---
+
+## 14. Vokabel vertiefen: "Üben"-Button auf der Karte (Anwendung zuerst, Beispiele als Fallback)
+
+**What it is**
+
+Problem: Man sieht die Übersetzung und weiß trotzdem nicht, wie man das Wort VERWENDET. Auf der Kartenrückseite (nach dem Aufdecken) ein Button "Üben": inline öffnet sich ein Eingabefeld "Bilde einen Satz mit …". Der Satz läuft durch denselben Judge wie der Anwenden-Modus (drei Urteile, Feedback). Danach geht es mit der NÄCHSTEN Karte der aktuellen Queue weiter — ein Fenster in die Anwenden-Funktionalität, kein Moduswechsel.
+
+Beispiele bewusst NACHGELAGERT (User-Vorgabe): 2-3 klassische Verwendungsbeispiele werden erst gezeigt, wenn (a) der Anwendungsversuch fehlschlägt oder (b) der User explizit "Beispiele zeigen" klickt. Erst Abruf versuchen (retrieval practice), dann Input — nicht umgekehrt.
+
+**Sketch**
+
+- Beispiele wie native_translation/tts als gecachtes Karten-Asset (neue Spalte example_sentences, generiert level-angemessen, Self-Heal-Pattern wie gehabt).
+- Judge: bestehender /api/vocab/judge-sentence, aber Erfolg committet NUR stage_sentence (Produktion ist Produktions-Evidenz), Recognition-Stage unberührt.
+- UI: Panel in der Kartenrückseite (kein Routenwechsel), "Weiter"-Button überspringt jederzeit.
+
+---
+
+## 15. Chat-Deployment: Vokabeln gezielt im Gespräch anwenden (+ Daily Task) — DER PRIORITÄTS-KANDIDAT
+
+**What it is**
+
+Kern-Painpoint aus echter Nutzung: "Ich würde neue Vokabeln gern benutzen, aber ich kann sie nicht recallen — und der Chat macht weniger Spaß als der Trainer, obwohl Sprechen am meisten bringt." Fix: dem Chat einen Spiel-Loop mit direktem Feedback geben.
+
+- Vor jedem User-Turn zeigt eine schmale Leiste ~3 Vorschlags-Wörter aus dem eigenen Wortschatz (NUR spanisches Wort + Wortart — kein Deutsch, der Abruf ist die Übung). Auswahlkriterien: bereits gesehen, niedrige/mittlere Stage, weder zu leicht noch irrelevant; idealerweise zum Gesprächsthema passend (kleiner LLM-Pick aus Kandidatenset).
+- Zusätzlich: aufklappbare Liste, aus der der User selbst wählt, welche Vokabeln er in der nächsten Antwort einbauen will.
+- Detektion: nach der Korrektur prüfen, welche Zielwörter in der Local Version vorkommen → als "deployed" markiert, visuelles Feedback (Häkchen an der Leiste).
+- Deployment = stärkste Lern-Evidenz (Produktion im Kontext) → committet stage_sentence.
+- **Daily Task: z.B. 10 Deployments pro Tag.** Verbindet sich mit FEATURE_IDEAS §11 (Voice/Text-Quoten) zu einem Tageszielsystem und ist die Brücke "Trainer-Dopamin → Chat".
+
+**Why prioritized**
+
+Konvergiert mit THEMES_PLAN (Vokabel-Vorschlagsleiste + Chat-Deployment-Gating ist dort schon konzipiert) — dies ist die theme-lose MVP-Version davon. Adressiert direkt: Recall-Problem, Chat-Motivation, "Vokabellernen bleibt nicht hängen".
+
+---
+
+## 16. Realtime-Sprachcoach (Fernziel, separater Modus)
+
+**What it is**
+
+User spricht; die KI unterbricht in Echtzeit wie ein menschlicher Coach: schiebt das richtige Wort ein, wenn deutsch ausgewichen wird; stoppt und erklärt bei strukturellen Fehlern.
+
+**Honest assessment**
+
+- Braucht eine Realtime-Speech-Architektur (Speech-to-Speech bzw. Streaming-STT+TTS) — fundamental anders als die heutige Batch-Pipeline. Die Latenz-Spec hat Streaming-ASR bewusst ausgeschlossen, weil fehlerhafte Lerner-Sprache mit Sprachmix der Worst Case für Streaming-Erkennung ist; genau dieser Konflikt (Echtzeit vs. Korrektur-Qualität = wichtigstes Feature) bleibt bestehen. Dazu ~10x Kosten pro Minute.
+- Deshalb: als EIGENER Experimentier-Modus denken (zusätzlich, nicht Ersatz), erst nachdem §15 dem Chat einen Kern-Loop gegeben hat.
+- 80%-Zwischenschritt mit heutiger Architektur: "Coach-Modus" — kurze Äußerungen, sofortige kompakte Korrektur (nur das Wichtigste, gesprochen via Auto-TTS), schneller Turn-Takt. Fühlt sich gesprächsnah an, behält Batch-Qualität.
+
+**Priorisierung (User-Session Aug 2026):** §15 zuerst (größter Hebel, kleinster Architektur-Eingriff), §14 danach (klein, rundet Trainer ab), §16 zuletzt (groß, eigenes Projekt).
