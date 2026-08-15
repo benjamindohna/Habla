@@ -159,6 +159,11 @@ export const userVocab = pgTable(
     // old `lapses` column (dropped in 0005 as write-only), this one has
     // a reader from day one.
     wrongCount: integer("wrong_count").notNull().default(0),
+    // The last 3 committed judge verdicts as a char string, newest last
+    // ("010" = wrong, right, wrong). Lets "Oft falsch" ask "was any of
+    // the last 3 sightings wrong?" without a full review-log table.
+    // X verdicts (no-ops) are not recorded.
+    recentResults: text("recent_results").notNull().default(""),
     lookedUp: integer("looked_up").notNull().default(1),
     lastSeen: integer("last_seen").notNull().default(nowSeconds),
     relevanceRank: integer("relevance_rank").notNull().default(999999),

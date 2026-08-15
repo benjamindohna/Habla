@@ -127,21 +127,27 @@ export async function getDueVocabQueue(
   // relevance, "recent" = due cards newest-first, "wrong" = due cards
   // most-lapsed first. "due" keeps the mixed fresh+backlog order.
   if (sort !== "due") {
-    // "wrong" is the practice DEFAULT, so it must cover ALL due cards,
-    // not just ones with lapses (a wrong_count > 0 filter would hide
-    // every never-wrong due card from the default view). Most-lapsed
-    // first; among the never-wrong majority, newest saves first so
-    // fresh conversation words keep leading the deck before backlog.
+    // "wrong" is a sharp problem-cards category: due AND (wrong in any
+    // of the last 3 sightings, OR more than 4 lifetime lapses). The
+    // practice default is "important" (due by relevance rank); the UI
+    // offers Wichtigste/Neueste as follow-ups when "wrong" is empty.
     const orderBy =
       sort === "recent"
         ? sql`${userVocab.createdAt} DESC`
         : sort === "important"
         ? sql`${userVocab.relevanceRank} ASC`
-        : sql`${userVocab.wrongCount} DESC, ${userVocab.createdAt} DESC`;
+        : sql`${userVocab.wrongCount} DESC, ${userVocab.lastSeen} ASC`;
+    const filter =
+      sort === "wrong"
+        ? and(
+            dueFilter,
+            sql`(POSITION('0' IN ${userVocab.recentResults}) > 0 OR ${userVocab.wrongCount} > 4)`,
+          )
+        : dueFilter;
     const rows = await db
       .select(selection)
       .from(userVocab)
-      .where(dueFilter)
+      .where(filter)
       .orderBy(orderBy)
       .limit(limit);
     return rows as DueVocabRow[];
@@ -225,6 +231,9 @@ export async function applyJudgeResult(
       lastSeen: now + fuzz,
       lookedUp: sql`${userVocab.lookedUp} + 1`,
       ...(isLapse ? { wrongCount: sql`${userVocab.wrongCount} + 1` } : {}),
+      // Rolling window of the last 3 verdicts (newest last) — feeds the
+      // "wrong in any of the last 3 sightings" criterion of Oft falsch.
+      recentResults: sql`RIGHT(${userVocab.recentResults} || ${judge}, 3)`,
     })
     .where(and(eq(userVocab.id, rowId), eq(userVocab.userId, userId)));
 }

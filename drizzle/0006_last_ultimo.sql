@@ -1,0 +1,1 @@
+ALTER TABLE "user_vocab" ADD COLUMN "recent_results" text DEFAULT '' NOT NULL;

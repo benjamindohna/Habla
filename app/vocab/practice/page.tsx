@@ -11,15 +11,16 @@ import {
 
 type Stage = "loading" | "ready" | "revealed" | "exiting" | "batchdone" | "empty" | "error";
 
-/** Orderings over the DUE cards — dueness is always the filter, the
- *  chip only picks the order. "Oft falsch" is the default: problem
- *  cards lead, fresh saves follow, backlog drains after. */
+/** Views over the DUE cards — dueness is always the filter. Wichtigste
+ *  (default) and Neueste are pure orderings; Oft falsch additionally
+ *  narrows to real problem cards (wrong in one of the last 3 sightings,
+ *  or >4 lifetime lapses). */
 type QueueSort = "recent" | "important" | "wrong";
 
 const SORT_OPTIONS: Array<{ key: QueueSort; label: string }> = [
-  { key: "wrong", label: "Oft falsch" },
-  { key: "recent", label: "Neueste" },
   { key: "important", label: "Wichtigste" },
+  { key: "recent", label: "Neueste" },
+  { key: "wrong", label: "Oft falsch" },
 ];
 
 interface QueueResponse {
@@ -55,7 +56,7 @@ export default function VocabPracticePage() {
   const [cards, setCards] = useState<ServerCard[]>([]);
   const [exitingId, setExitingId] = useState<number | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
-  const [sort, setSort] = useState<QueueSort>("wrong");
+  const [sort, setSort] = useState<QueueSort>("important");
   // Ids practiced (committed/deleted) since the last sort change. Sent
   // as `exclude` so "Trotzdem weiterlernen" loads the NEXT batch, and
   // used to tell "batch finished" apart from "nothing left at all".
@@ -130,7 +131,7 @@ export default function VocabPracticePage() {
   }
 
   useEffect(() => {
-    void loadBatch("wrong", []);
+    void loadBatch("important", []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -316,18 +317,48 @@ export default function VocabPracticePage() {
         {stage === "empty" && (
           <div className="text-center mt-12 space-y-4">
             <p className="text-3xl">🎉</p>
-            <p className="text-lg font-medium text-neutral-800">Alles gelernt!</p>
-            <p className="text-sm text-neutral-500 leading-relaxed">
-              Du hast alle fälligen Karten durch.<br />
-              Starte einen neuen Chat, um neue Wörter zu entdecken —<br />
-              sie landen automatisch hier.
-            </p>
-            <button
-              onClick={() => router.push("/")}
-              className="mt-4 px-5 py-2 rounded-lg bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors"
-            >
-              Neuen Chat starten →
-            </button>
+            {sort === "wrong" ? (
+              <>
+                <p className="text-lg font-medium text-neutral-800">
+                  Keine Problemkarten fällig
+                </p>
+                <p className="text-sm text-neutral-500 leading-relaxed">
+                  Gerade ist keine Karte fällig, die du kürzlich oder oft
+                  falsch hattest. Sehr gut! Lern stattdessen:
+                </p>
+                <div className="flex justify-center gap-2 mt-4">
+                  <button
+                    onClick={() => handleSortChange("important")}
+                    className="px-5 py-2 rounded-lg bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors"
+                  >
+                    Wichtigste lernen
+                  </button>
+                  <button
+                    onClick={() => handleSortChange("recent")}
+                    className="px-5 py-2 rounded-lg border border-neutral-300 text-neutral-700 text-sm hover:border-neutral-500 hover:text-neutral-900 transition-colors"
+                  >
+                    Neueste lernen
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-lg font-medium text-neutral-800">Alles gelernt!</p>
+                <p className="text-sm text-neutral-500 leading-relaxed">
+                  Du hast alle fälligen Karten durch.<br />
+                  Starte einen neuen Chat, um neue Wörter zu entdecken —<br />
+                  sie landen automatisch hier.
+                </p>
+              </>
+            )}
+            {sort !== "wrong" && (
+              <button
+                onClick={() => router.push("/")}
+                className="mt-4 px-5 py-2 rounded-lg bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors"
+              >
+                Neuen Chat starten →
+              </button>
+            )}
           </div>
         )}
 
